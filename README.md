@@ -132,6 +132,7 @@
 - [Token 计费与缓存](./13-LLM/LLM-Token计费与缓存.md)
 - [messages 与多轮对话：上一轮的数据是怎么发出去的](./13-LLM/LLM-messages与多轮对话.md)
 - [一次 API 请求的完整旅程](./13-LLM/LLM-一次API请求的完整旅程.md)
+- [上下文窗口（Context Window）](./13-LLM/LLM-上下文窗口.md)
 - [大模型服务的数据留存与隐私边界](./13-LLM/LLM-数据留存与隐私边界.md)
 - [大模型结构化输出（JSON）](./13-LLM/LLM-结构化输出.md)
 - [智能体运行方式](./13-LLM/智能体运行方式.md)
