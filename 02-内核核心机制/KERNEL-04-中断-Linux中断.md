@@ -188,7 +188,7 @@ void irq_exit(void)
 }
 ```
 
-一句话概括这三个函数的分工：`__handle_domain_irq` **翻译**（hwirq→virq）、`generic_handle_irq` **分发**（找到 irq_desc 和对应的 flow handler）、`handle_irq_event` **执行**（挨个调用 action）。`irq_exit` 则顺手把下半部点火。
+一句话概括这三个函数的分工：`__handle_domain_irq` **翻译**（hwirq→virq）、`generic_handle_irq` **分发**（找到 irq_desc 和对应的 flow handler）、`handle_irq_event` **执行**（挨个调用 action）。`irq_exit` 则顺手在这里把软中断（下半部）跑掉。
 
 ## 七、disable_irq 的坑
 
