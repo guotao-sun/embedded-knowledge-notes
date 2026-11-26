@@ -119,13 +119,13 @@
 
 ### 12-Python
 
-- [Python print函数讲解](./12-Python/Python-print函数讲解.md)
-- [Python subprocess 模块讲解](./12-Python/Python-subprocess模块讲解.md)
-- [Python 入门学习问答合集](./12-Python/Python学习问答合集.md)
-- [Python 异常处理与文件读写问答](./12-Python/Python异常处理与文件读写问答.md)
-- [Python 模块与包问答](./12-Python/Python模块与包问答.md)
-- [Python 网络请求问答](./12-Python/Python网络请求问答.md)
-- [Python 对象模型笔记：名字是标签，对象是实物](./12-Python/python-object-model-notes.md)
+- [Python print函数讲解](./12-Python/Python-01-基础-print与输入输出.md)
+- [Python 对象模型笔记：名字是标签，对象是实物](./12-Python/Python-02-对象-名字与对象模型.md)
+- [Python 入门学习问答合集](./12-Python/Python-03-基础-入门问答合集.md)
+- [Python 异常处理与文件读写问答](./12-Python/Python-04-文件-异常处理与文件读写.md)
+- [Python 模块与包问答](./12-Python/Python-05-模块-模块与包.md)
+- [Python 网络请求问答](./12-Python/Python-06-网络-HTTP请求与urllib.md)
+- [Python subprocess 模块讲解](./12-Python/Python-07-进程-subprocess与子进程.md)
 
 ### 13-LLM
 
