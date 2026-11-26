@@ -1,0 +1,34 @@
+digraph AgentLoop {
+  graph [rankdir=TB, bgcolor="#ffffff", pad="0.45", nodesep="0.60", ranksep="0.50",
+         fontname="Noto Sans CJK SC", dpi=220];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=15,
+         color="#42536e", penwidth=1.5, fillcolor="#f1f5fc", fontcolor="#1c2430",
+         margin="0.26,0.16"];
+  edge  [color="#55688a", penwidth=1.7, arrowsize=0.85, fontname="Noto Sans CJK SC",
+         fontsize=12.5, fontcolor="#3d4a61"];
+
+  user  [label=<<b>① 用户提问</b>>, fillcolor="#e6f0ff", color="#2f5d9e"];
+  build [label=<<b>② Agent 拼装请求</b><br/><font point-size="13">system prompt（身份、规则）<br/>tools 定义（JSON Schema）<br/>messages（历史全量）</font>>,
+         fillcolor="#f4f7fd"];
+  llm   [label=<<b>③ LLM</b><br/><font point-size="13">一次独立的无状态请求</font>>,
+         fillcolor="#e9f7ef", color="#2f6b4f"];
+  dec   [label=<<b>④ 这次返回什么？</b>>, shape=diamond, style="filled", fillcolor="#fff5e2",
+         color="#a4701d", fontsize=14, margin="0.02,0.02", height=1.0, width=2.7];
+  exec  [label=<<b>⑤ Agent 执行工具</b><br/><font point-size="13">json.loads(arguments) → 调本地函数</font><br/><font point-size="12" color="#5b3fa0">tool_calls 分支</font>>,
+         fillcolor="#f6f1ff", color="#5b3fa0"];
+  back  [label=<<b>⑥ 工具结果回填</b><br/><font point-size="13">messages += assistant(tool_calls)<br/>messages += tool(result)</font>>,
+         fillcolor="#f6f1ff", color="#5b3fa0"];
+  reply [label=<<b>⑦ Agent 回复用户</b><br/><font point-size="13">文本即最终答案</font><br/><font point-size="12" color="#2f5d9e">纯文本分支</font>>,
+         fillcolor="#e6f0ff", color="#2f5d9e", penwidth=2.2];
+
+  user -> build;
+  build -> llm;
+  llm -> dec;
+  dec -> exec  [color="#5b3fa0"];
+  dec -> reply [color="#2f5d9e"];
+  exec -> back;
+  back -> build [label="  再发一次请求（循环）  ", style=dashed, color="#8a5cc7",
+                 fontcolor="#7a4fb3", fontsize=13, constraint=false, penwidth=1.9];
+
+  {rank=same; exec; reply;}
+}

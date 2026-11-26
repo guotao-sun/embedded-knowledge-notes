@@ -16,18 +16,9 @@ system prompt（身份、规则）
 
 模型回的也不是"哪个技能"，而是结构化的 `tool_calls` 或最终文本。所以流程图更接近：
 
-```
-用户 ──▶ Agent 拼装请求 ──▶ LLM
-                              │
-              ┌───────────────┴───────────────┐
-              │ 返回 tool_calls               │ 返回文本
-              ▼                               ▼
-      Agent 执行工具                    Agent 直接回复用户
-              │
-      工具结果回填进 messages
-              │
-              └──▶ 再发一次请求（循环）
-```
+![Agent Loop 一次循环的完整路径](../images/agent-loop-flow.png)
+
+*图：从提问到工具回填的完整路径。③ 是唯一"出网"的一步，⑤ 和 ⑥ 都在本地完成；虚线是循环回到 ②，也就是"再发一次请求"。（图源：`images/agent-loop-flow.dot`，Graphviz 渲染）*
 
 ## 二、这个循环的名字：Agent Loop 与 ReAct
 
