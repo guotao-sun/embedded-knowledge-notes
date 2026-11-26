@@ -1,0 +1,45 @@
+digraph C {
+  graph [rankdir=TB, bgcolor="#ffffff", pad="0.35", nodesep="0.9", ranksep="0.26",
+         fontname="Noto Sans CJK SC", dpi=210];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=13.5,
+         margin="0.22,0.11", penwidth=1.3, fontcolor="#1c2430", width=3.7];
+  edge  [color="#6b7a93", arrowsize=0.72, penwidth=1.4];
+
+  hs [label=<<b>STM32 · Cortex-M · NVIC</b>>, fillcolor="#2f6b4f", fontcolor="white",
+        color="#2f6b4f", margin="0.18,0.14"];
+  hl [label=<<b>Linux · Cortex-A · GIC</b>>, fillcolor="#2f5d9e", fontcolor="white",
+        color="#2f5d9e", margin="0.18,0.14"];
+
+  s1 [label="① 外设置中断标志", fillcolor="#eaf7f0", color="#2f6b4f"];
+  s2 [label="② NVIC 按优先级选最高一路", fillcolor="#eaf7f0", color="#2f6b4f"];
+  s3 [label="③ 向量表基址 + 4×IRQn", fillcolor="#eaf7f0", color="#2f6b4f"];
+  s4 [label="④ 硬件自动压栈 8 个寄存器", fillcolor="#fff5e2", color="#a4701d"];
+  s5 [label="⑤ 直接跳 TIM2_IRQHandler", fillcolor="#eaf7f0", color="#2f6b4f"];
+  s6 [label="⑥ 你的 ISR 从头做到尾", fillcolor="#eaf7f0", color="#2f6b4f", penwidth=2];
+  s7 [label="⑦ 硬件自动出栈，返回原处", fillcolor="#f3f5fa", color="#5c6b85"];
+  s8 [label="⑧ 没有下半部：全在 ISR 里", fillcolor="#f3f5fa", color="#9aa6b8", fontcolor="#6b7688"];
+
+  l1 [label="① 外设置中断标志", fillcolor="#e6f0ff", color="#2f5d9e"];
+  l2 [label="② GIC 汇总 → 拉高同一根 IRQ", fillcolor="#e6f0ff", color="#2f5d9e"];
+  l3 [label="③ CPU 进统一入口 vector_irq", fillcolor="#e6f0ff", color="#2f5d9e"];
+  l4 [label="④ svc_entry 软件保存现场", fillcolor="#fff5e2", color="#a4701d"];
+  l5 [label="⑤ gic_handle_irq 读 INTACK 得 hwirq", fillcolor="#e6f0ff", color="#2f5d9e"];
+  l6 [label="⑥ hwirq→virq → irq_desc → action", fillcolor="#e6f0ff", color="#2f5d9e"];
+  l7 [label="⑦ 你的 handler：只做最急的事", fillcolor="#e6f0ff", color="#2f5d9e", penwidth=2];
+  l8 [label="⑧ irq_exit：点火下半部，再返回", fillcolor="#f3f5fa", color="#5c6b85"];
+
+  hs -> s1; hl -> l1;
+  s1 -> s2 -> s3 -> s4 -> s5 -> s6 -> s7 -> s8;
+  l1 -> l2 -> l3 -> l4 -> l5 -> l6 -> l7 -> l8;
+
+  {rank=same; hs; hl;}
+  {rank=same; s1; l1;}
+  {rank=same; s2; l2;}
+  {rank=same; s3; l3;}
+  {rank=same; s4; l4;}
+  {rank=same; s5; l5;}
+  {rank=same; s6; l6;}
+  {rank=same; s7; l7;}
+  {rank=same; s8; l8;}
+  hs -> hl [style=invis];
+}

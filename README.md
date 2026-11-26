@@ -13,18 +13,18 @@
 
 ### 02-内核核心机制
 
-- [linux 启动流程](./02-内核核心机制/KERNEL-01-启动-Linux启动流程.md)
-- [LINUX 启动代码](./02-内核核心机制/KERNEL-02-启动-Linux启动代码.md)
-- [LINUX 初始化的宏](./02-内核核心机制/KERNEL-03-启动-初始化宏.md)
-- [LINUX 中断](./02-内核核心机制/KERNEL-04-中断-Linux中断.md)
-- [imx6ull Linux 中断与 stm32 中断](./02-内核核心机制/KERNEL-05-中断-imx6ull与STM32中断对比.md)
-- [linux 调度](./02-内核核心机制/KERNEL-06-调度-Linux调度.md)
-- [STM32 与 LINUX 的任务调度方式](./02-内核核心机制/KERNEL-07-调度-STM32与Linux任务调度对比.md)
-- [LINUX 并发与竞争](./02-内核核心机制/KERNEL-08-并发-并发与竞争.md)
-- [LINUX 等待队列](./02-内核核心机制/KERNEL-09-同步-等待队列.md)
-- [linux 定时器](./02-内核核心机制/KERNEL-10-时间-定时器.md)
-- [页表](./02-内核核心机制/KERNEL-11-内存-页表.md)
-- [linux 用户态内核态](./02-内核核心机制/KERNEL-12-权限-用户态与内核态.md)
+- [Linux 启动流程](./02-内核核心机制/KERNEL-01-启动-Linux启动流程.md)
+- [Linux 启动代码：从 stext 到 start_kernel](./02-内核核心机制/KERNEL-02-启动-Linux启动代码.md)
+- [初始化的宏：initcall 是怎么排队的](./02-内核核心机制/KERNEL-03-启动-初始化宏.md)
+- [Linux 中断：上半部、GIC 与完整调用链](./02-内核核心机制/KERNEL-04-中断-Linux中断.md)
+- [i.MX6ULL 的 Linux 中断 vs STM32 中断](./02-内核核心机制/KERNEL-05-中断-imx6ull与STM32中断对比.md)
+- [Linux 调度：CFS 与调度类](./02-内核核心机制/KERNEL-06-调度-Linux调度.md)
+- [STM32 与 Linux 的任务调度：切换时机差在哪](./02-内核核心机制/KERNEL-07-调度-STM32与Linux任务调度对比.md)
+- [Linux 并发与竞争：原子操作、自旋锁、信号量、互斥锁](./02-内核核心机制/KERNEL-08-并发-并发与竞争.md)
+- [等待队列：条件驱动的睡眠与唤醒](./02-内核核心机制/KERNEL-09-同步-等待队列.md)
+- [Linux 定时器：jiffies、timer_list 与 hrtimer](./02-内核核心机制/KERNEL-10-时间-定时器.md)
+- [页表：虚拟地址是怎么变成物理地址的](./02-内核核心机制/KERNEL-11-内存-页表.md)
+- [用户态与内核态：三条进门的路](./02-内核核心机制/KERNEL-12-权限-用户态与内核态.md)
 
 ### 03-驱动开发基础
 

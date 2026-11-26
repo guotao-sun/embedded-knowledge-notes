@@ -1,44 +1,67 @@
-# LINUX 中断
+# Linux 中断：上半部、GIC 与完整调用链
 
-## 一、上半部与下半部
+## 一、先说结论
 
-在有些资料中也将上半部和下半部称为**顶半部和底半部**，都是一个意思。
+- 中断处理被切成两段：**上半部**只做"最急、最短"的事（清标志、把数据搬进内存），**下半部**做耗时的处理。目的只有一个：让中断函数快进快出。
+- 在 CPU 眼里，所有外设中断都是**同一个 IRQ 信号**；进内核后才靠 GIC 读出的中断号 + `irq_domain` 映射，分发到某个驱动注册的函数。
+- 所以"中断号"有两套：硬件号（hwirq）和内核号（virq），中间那层映射是设备树的 `interrupt-parent` / `interrupts` 在起作用。
+- 中断上下文里**不能睡眠**。凡是"要等、要阻塞"的活，都得挪到下半部或线程化中断里去。
 
-我们在使用 `request_irq` 申请中断的时候注册的中断服务函数属于中断处理的**上半部**，只要中断触发，中断处理函数就会执行。
+## 二、为什么要分上半部与下半部
 
-中断处理函数一定要快点执行完毕，越短越好。但现实中有些中断处理过程比较费时间，必须对其进行拆分，缩小中断处理函数的执行时间。
+有些资料把上半部/下半部叫**顶半部/底半部**，是同一个意思。
 
-**举例**：电容触摸屏通过中断通知 SoC 有触摸事件发生，SoC 响应中断，然后通过 I2C 接口读取触摸坐标值并上报给系统。但 I2C 速度最高只有 400 Kbit/s，在中断中通过 I2C 读取数据会浪费时间。可以将 I2C 读取操作暂后执行，中断处理函数仅响应中断、清除中断标志位即可。
+用 `request_irq` 注册的中断服务函数属于**上半部**：只要中断触发，它就会执行。而它必须短，因为这段时间里同级中断（甚至所有中断）是被关掉的，拖久了整机响应都受影响。
 
-此时中断处理过程分为两部分：
+但有些活天生费时间。**举例**：电容触摸屏用中断通知 SoC"有触摸事件"，SoC 响应中断后要通过 I2C 读坐标，而 I2C 最高才 400 Kbit/s，在中断里读几十个字节就是几百微秒。做法是：中断函数只做"响应中断、清标志位"，I2C 读取推到下半部去做。
 
-- **上半部**：即中断处理函数，处理过程比较快、不会占用很长时间的操作放在上半部完成。
-- **下半部**：比较耗时的代码提出来，交给下半部执行，让中断处理函数快进快出。
+于是处理被拆成两半：
 
-> Linux 内核将中断分为上半部和下半部的主要目的就是实现中断处理函数的快进快出。对时间敏感、执行速度快的操作放到上半部；剩下的工作放到下半部（比如在上半部将数据拷贝到内存，数据的具体处理放到下半部）。
->
-> 至于哪些代码属于上半部、哪些属于下半部，没有明确规定，一切根据实际使用情况判断。
+- **上半部**：时间敏感、不能等、不能睡的活（读状态寄存器、清中断标志、拷贝数据到内存、唤醒下半部）
+- **下半部**：能等、耗时的活（解析数据、走协议栈、上报事件）
 
----
+> 哪些代码归上半部、哪些归下半部，内核没有硬性规定，按实际情况判断：判断依据就两条——**这段代码能不能等？关中断期间跑它值不值？**
 
-## 二、GIC 中断控制器
+## 三、下半部的三种实现
 
-### Q：GPIO 中断控制器只是起到汇总的作用吗？自身不对 GPIO 中断内容做其他处理？
+下半部不是一种机制，是一类机制的统称。常用的三件套差别很大：
 
-**A：** 大方向正确，但"只是汇总"不完全准确。更准确地说，GPIO 中断控制器不仅负责汇总多个 GPIO 中断，还负责 GPIO 中断的**检测、配置和管理**；但它不会处理这些中断事件的业务含义。
+| | softirq | tasklet | workqueue |
+|---|---|---|---|
+| 运行上下文 | 软中断（中断上下文） | 软中断（中断上下文） | 内核线程（进程上下文） |
+| 能否睡眠 | 不能 | 不能 | **能** |
+| 并发性 | 同一类型可在多 CPU 并行 | 同一 tasklet 串行 | 由工作队列线程调度 |
+| 由谁触发 | 内核静态注册（网络、定时器等） | 驱动动态创建 | 驱动动态创建 |
+| 典型用途 | 网络收包、定时器 | 简单延后处理 | 需要睡眠/耗时长的活 |
 
-简单地说，每个外设与 CPU 只通过一两根中断线连接，但每个外设会有一大堆中断。比如 DMA 许多通路都有传输完成中断，这些中断任何一个触发都会统一为 DMA 中断传给 CPU，之后 CPU 对应的外设中断处理函数再去读 DMA 的状态，判断是什么触发了这次中断。
+再补一个现代做法：**线程化中断**（`request_threaded_irq`）。上半部只判断"是不是我的中断"，然后返回 `IRQ_WAKE_THREAD`，真正的处理函数跑在一个内核线程里——**可以睡眠**，能直接在里面做 I2C/SPI 传输。RK3568 这类平台上，I2C、SPI 控制器驱动大量使用这种方式。
 
-### Q：什么是级联中断控制器（Cascaded Interrupt Controller）？
+选择顺序大致是：
 
-**A：** 任何能够管理多个中断源，并向上级产生一个中断的硬件模块，都可以被抽象为 `interrupt-controller`。
-
-- GIC / NVIC 是 CPU 级中断控制器
-- GPIO / EXTI 这种模块是二级中断控制器
-
-Linux 中的 `interrupt-controller` 不一定代表"最终连接 CPU 的那个控制器"，只要这个硬件模块能够管理一组中断源，就可以被抽象成 `interrupt-controller`。
-
+```text
+能在上半部 3 行代码搞定 → 就放上半部
+需要一点延后、不需要睡 → tasklet
+需要睡眠、要访问 I2C/SPI/文件 → workqueue 或线程化中断
 ```
+
+## 四、GIC：ARM 的"总机"
+
+### 4.1 GPIO 中断控制器只是汇总吗
+
+大方向对，但"只是汇总"不准确。GPIO 中断控制器除了汇总多路 GPIO 中断，还负责**检测方式（电平/边沿）、触发配置、屏蔽与状态管理**；它不负责这些中断的"业务含义"。
+
+外设和 CPU 之间通常只有一两根中断线，可外设内部却有一堆中断源。比如 DMA 有很多通路，任一通路传输完成都汇总成"一个 DMA 中断"报给 CPU；CPU 上的 DMA 中断处理函数再去读 DMA 的状态寄存器，判断这次是谁触发的。
+
+### 4.2 级联中断控制器
+
+任何"能管理多个中断源、并向上级产生一个中断"的硬件模块，都可以被抽象成 `interrupt-controller`：
+
+- GIC / NVIC：CPU 级中断控制器
+- GPIO / EXTI：二级（级联）中断控制器
+
+Linux 里的 `interrupt-controller` **不一定**是最终连 CPU 的那个，只要它能管一组中断源，就能这么抽象。
+
+```text
                  CPU
                    |
                  GIC
@@ -52,319 +75,76 @@ Linux 中的 `interrupt-controller` 不一定代表"最终连接 CPU 的那个�
    GPIO0  GPIO1   GPIO2
 ```
 
-### GIC 概述
+### 4.3 GIC 的版本
 
-GIC 是 ARM 公司给 Cortex-A/R 内核提供的中断控制器，类似 Cortex-M 内核中的 NVIC。
-
-目前 GIC 有 4 个版本：V1~V4。
+GIC 是 ARM 给 Cortex-A/R 的中断控制器，地位相当于 Cortex-M 里的 NVIC。
 
 | 版本 | 适用架构 | 典型内核 |
-|------|---------|---------|
+|---|---|---|
 | V1 | 最老，已废弃 | — |
-| V2 | ARMv7-A（32位） | Cortex-A7、A9、A15 |
-| V3/V4 | ARMv8-A/R（64位） | Cortex-A55 等 |
+| V2 | ARMv7-A（32 位） | Cortex-A7、A9、A15 |
+| V3/V4 | ARMv8-A/R（64 位） | Cortex-A55 等 |
 
-> RK3568 是 Cortex-A55 内核，但本教程主要讲解 GIC V2。GIC V2 最多支持 8 个核。
+RK3568 是 Cortex-A55（ARMv8），硬件上是 GIC V3；但 GIC V2 的模型最简单，很多教材拿它入门。V2 最多支持 8 个核，ARM 对应售卖的 IP 核叫 GIC400。
 
-ARM 会根据 GIC 版本研发不同的 IP 核，半导体厂商直接购买即可。比如 ARM 针对 GIC V2 开发出了 GIC400 这个中断控制器 IP 核。
+### 4.4 只给 CPU 四根线
 
-当 GIC 接收到外部中断信号后报给 ARM 内核，但 ARM 内核只提供了四个信号给 GIC 汇报中断情况：
+GIC 收到外部中断后要报给 CPU，但 ARM 只给了四个信号：
 
 | 信号 | 含义 |
-|------|------|
-| VFIQ | 虚拟快速 FIQ |
-| VIRQ | 虚拟快速 IRQ |
+|---|---|
+| VFIQ | 虚拟 FIQ（虚拟化用） |
+| VIRQ | 虚拟 IRQ（虚拟化用） |
 | FIQ | 快速中断 |
-| IRQ | 外部中断 |
+| IRQ | 普通外部中断 |
 
-VFIQ 和 VIRQ 针对虚拟化，不讨论虚拟化的话剩下 FIQ 和 IRQ，本教程只使用 IRQ。相当于 GIC 最终向 ARM 内核上报一个 IRQ 信号。
+不谈虚拟化就只剩 FIQ 和 IRQ，日常驱动用的全是 IRQ——**所以 GIC 管理的上千个中断，最终都压成同一个 IRQ 信号送进 CPU**。
 
----
+### 4.5 中断号怎么分区
 
-## 三、常见问题
+GIC V2 的硬件中断号（hwirq）分区是固定的：
 
-### Q：`disable_irq_nosync` 和 `disable_irq` 区别？
+| 号段 | 类型 | 说明 |
+|---|---|---|
+| 0–15 | SGI | 软件触发中断，用于多核间 IPI（核间通知） |
+| 16–31 | PPI | 每个 CPU 私有的中断（如本地定时器） |
+| 32–1019 | SPI | 外设共享中断，GPIO、I2C、SPI 都在这里 |
 
-**A：**
+这解释了源码里那句 `if (irqnr < 16) { ... handle_IPI(...) }`：小于 16 的不是外设中断，而是核间消息。
 
-- `disable_irq()` 会等待正在执行的中断处理函数结束
-- `disable_irq_nosync()` 是关闭后立即返回
+## 五、从硬件到驱动函数：完整路径
 
-如果在中断处理函数中调用 `disable_irq()`，可能出现死等：当前 IRQ 正在执行，`disable_irq()` 等待当前 IRQ 结束，但当前函数还没返回。此时必须使用 `disable_irq_nosync()`。
-
-> `disable_irq_nosync()` 只是"暂时关掉中断开关"，不会释放资源；资源一直保持到 `free_irq()` 被调用，用于很多需要反复开启中断的场景。
-
-### Q：`disable_irq()` 有什么意义？
-
-**A：** 目的是等中断执行完后再释放资源。
-
-- **场景一（多核系统）**：假设 CPU0 正在操作网卡资源，CPU1 认为 IRQ 已经关闭，对资源进行释放，可能导致 CPU0 继续访问已释放的内存，从而系统崩溃。
-- **场景二（卸载驱动）**：避免中断访问卸载后的资源。
-
-### Q：驱动上报事件后，用户层 read 的数据就自动变成了事件对吗？
-
-**A：** 驱动调用 `input_report_key()` 上报事件后，事件会进入 Linux input 子系统的事件队列，用户层 `read()` 读取的就是这个队列里的 `struct input_event` 数据。
-
-不是说用户层的 `read()` 数据"自动变成"事件，而是 input 框架帮你完成了从内核事件到字符设备数据流的转换。
-
-### Q：input 子系统并没有简化按键检测的流程，只是把各个输入流程规范化了，对吗？
-
-**A：** 理解基本正确，而且抓住了 input 子系统设计的核心。
-
-更准确地说，input 子系统不是为了简化"硬件输入检测过程"，而是为了简化"输入设备驱动和应用之间的交互"，同时把各种输入设备的事件模型统一。它主要解决的是软件架构问题，不是减少 GPIO 检测、消抖、中断这些硬件处理工作。
-
----
-
-## 四、i.MX6ULL Linux 中断与 STM32 中断对比
-
-### 名称区别
-
-| 平台 | 缩写 | 全称 | 中文 |
-|------|------|------|------|
-| STM32 (Cortex-M) | NVIC | Nested Vectored Interrupt Controller | 嵌套向量中断控制器 |
-| Linux (Cortex-A) | GIC | Generic Interrupt Controller | 通用中断控制器 |
-
-### GIC 模型
-
-```
-硬件中断源（很多个）
-      ↓
-中断控制器（GIC）
-      ↓
-分两根线给 CPU：
-    IRQ 线
-    FIQ 线
-      ↓
-CPU 进入：
-    vector_irq 或 vector_fiq
-```
-
-> Linux 驱动里 `request_irq()` 注册的全部走 `vector_irq`。
-
----
-
-## 五、Linux 中断完整路径
-
-```
-【汇编层】
-vector_irq
+```text
+【硬件】
+外设拉中断线 → GIC 记录 → 向 CPU 拉高 IRQ
     ↓
-__irq_svc
+【汇编层】arch/arm/kernel/entry-armv.S
+vector_irq → __irq_svc（软件保存现场）→ irq_handler
     ↓
-irq_handler
+【架构层】drivers/irqchip/irq-gic.c
+handle_arch_irq（函数指针）→ gic_handle_irq
+    读 GIC_CPU_INTACK 拿到 hwirq
     ↓
-【架构层】
-handle_arch_irq
+【通用 IRQ 框架】kernel/irq/
+__handle_domain_irq → irq_find_mapping(hwirq → virq) → generic_handle_irq
     ↓
-gic_handle_irq
+irq_desc[virq] → handle_level_irq / handle_edge_irq（按触发类型选择）
     ↓
-【通用 IRQ 框架】
-generic_handle_irq
-    ↓
-__handle_domain_irq
-    ↓
-irq_desc
-    ↓
-handle_level_irq / handle_edge_irq
-    ↓
-handle_irq_event      ← ★ 核心函数
+handle_irq_event  ← 核心：遍历 action 链表
     ↓
 【驱动层】
-action->handler()     ← request_irq 注册的函数
+action->handler()   ← request_irq 注册的那个函数
 ```
 
----
+两个值得记住的细节：
 
-## 六、源码对照
+- **共享中断靠链表**：`irq_desc` 里挂一条 `action` 链表，多个驱动可以注册同一个 virq（如老式 PCI 共享中断），`handle_irq_event` 挨个调用，每个 handler 必须自己判断"这次是不是我的中断"，不是就返回 `IRQ_NONE`。
+- **FIQ 走另一条路**：`vector_fiq`，ARM 设计上它有更多 banked 寄存器（r8–r12），切换开销小，留给对实时性要求极高的外设。日常驱动一律走 IRQ。
 
-| 层级 | STM32 | Linux |
-|------|-------|-------|
-| 启动/向量表 | `startup_stm32f429xx.s` | `arch/arm/kernel/entry-armv.S` |
-| 中断处理 | `stm32f4xx_it.c` | `drivers/irqchip/irq-gic.c` |
-| 通用框架 | — | `kernel/irq/handle.c` |
-
-### Linux 启动文件
-
-| 文件 | 作用 |
-|------|------|
-| `arch/arm/kernel/head.S` | 真正的内核启动入口（`stext`） |
-| `arch/arm/boot/compressed/head.S` | 解压 zImage 的部分 |
-| `arch/arm/kernel/entry-armv.S` | 异常向量表 + 中断/异常入口 |
-
-### Linux ARM（32位）启动流程
-
-1. Bootloader（U-Boot 等）加载 kernel（zImage 或 Image）
-2. 跳转到 `arch/arm/boot/compressed/head.S`（如果用了压缩镜像）→ 解压 kernel
-3. 跳转到真正入口：`arch/arm/kernel/head.S` 的 `stext`
-4. 初始化 MMU、页表、CPU、设备树等
-5. 最终跳转到 `start_kernel()`（`init/main.c`）—— 进入通用内核初始化
-
-> `entry-armv.S` 是在第 3 步之后，内核已经启动并设置好向量表时才起作用的。
-
-### `handle_domain_irq` 源码
+## 六、三个关键函数
 
 ```c
-int handle_domain_irq(struct irq_domain *domain,
-                      unsigned int hwirq,
-                      struct pt_regs *regs)
-{
-    irq_enter();
-    irq = irq_find_mapping(domain, hwirq);
-    generic_handle_irq(irq);
-    irq_exit();
-    return 0;
-}
-```
-
----
-
-## 七、向量表差异
-
-### STM32
-
-```asm
-.section .isr_vector,"a",%progbits
-g_pfnVectors:
-    .word _estack                  /* 0x0000 SP初值 */
-    .word Reset_Handler            /* 0x0004 Reset */
-    .word NMI_Handler              /* 0x0008 NMI */
-    .word HardFault_Handler        /* 0x000C HardFault */
-    .word MemManage_Handler
-    .word BusFault_Handler
-    .word UsageFault_Handler
-    ...
-    .word SysTick_Handler
-
-    /* 外部中断 */
-    .word WWDG_IRQHandler
-    .word PVD_IRQHandler
-    .word TAMP_STAMP_IRQHandler
-    ...
-    .word TIM2_IRQHandler
-```
-
-### Linux ARM
-
-```asm
-__vectors_start:
-    b reset
-    b undefined
-    b svc
-    b prefetch_abort
-    b data_abort
-    b reserved
-    b vector_irq
-    b vector_fiq
-```
-
-> **IRQ 不区分具体设备！** 不管是 UART、GPIO、SPI 还是 I2C，全部先进 `vector_irq`。
-
-ARM 的异常向量（从低地址开始）：
-
-1. Reset（复位）
-2. Undefined Instruction
-3. Prefetch Abort
-4. Data Abort
-5. Address Exception
-6. IRQ（普通中断）
-7. FIQ（快速中断）
-
-### 为什么 FIQ 单独处理？
-
-FIQ 在 ARM 设计上比 IRQ 有更高优先级、更多 banked 寄存器（r8-r12），切换开销更小，适合对实时性要求极高的外设（如某些音频、DMA 等）。
-
----
-
-## 八、上下文保存差异
-
-| 平台 | 保存方式 | 保存内容 |
-|------|---------|---------|
-| STM32 (Cortex-M) | 硬件自动 | R0-R3、R12、LR、PC、xPSR |
-| Linux ARM | 软件保存（entry.S） | R0-R12、SP、LR、PC、CPSR、Banked regs |
-
----
-
-## 九、调用链源码
-
-### 汇编层：`arch/arm/kernel/entry-armv.S`
-
-```asm
-W(b) vector_irq
-    ↓
-vector_stub irq, IRQ_MODE, 4
-    .long __irq_usr       @ 0  (USR_26 / USR_32)
-    .long __irq_invalid   @ 1  (FIQ_26 / FIQ_32)
-    .long __irq_invalid   @ 2  (IRQ_26 / IRQ_32)
-    .long __irq_svc       @ 3  (SVC_26 / SVC_32)
-    .long __irq_invalid   @ 4
-    ↓
-__irq_svc:
-    svc_entry
-    irq_handler
-    ↓
-.macro irq_handler
-#ifdef CONFIG_MULTI_IRQ_HANDLER
-    ldr r1, =handle_arch_irq
-    mov r0, sp
-    adr lr, BSYM(9997f)
-    ldr pc, [r1]
-#else
-    arch_irq_handler_default
-#endif
-9997:
-.endm
-```
-
-### 架构层：`drivers/irqchip/irq-gic.c`
-
-```c
-void __init gic_init_bases(unsigned int gic_nr, int irq_start,
-   void __iomem *dist_base, void __iomem *cpu_base,
-   u32 percpu_offset, struct device_node *node)
-{
-    .....
-    set_handle_irq(gic_handle_irq);
-    .....
-}
-
-void __init set_handle_irq(void (*handle_irq)(struct pt_regs *))
-{
-    if (handle_arch_irq)
-        return;
-    handle_arch_irq = handle_irq;
-}
-```
-
-```c
-static void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
-{
-    u32 irqstat, irqnr;
-    struct gic_chip_data *gic = &gic_data[0];
-    void __iomem *cpu_base = gic_data_cpu_base(gic);
-
-    do {
-        irqstat = readl_relaxed(cpu_base + GIC_CPU_INTACK);
-        irqnr = irqstat & GICC_IAR_INT_ID_MASK;
-
-        if (likely(irqnr > 15 && irqnr < 1021)) {
-            handle_domain_irq(gic->domain, irqnr, regs);
-            continue;
-        }
-        if (irqnr < 16) {
-            writel_relaxed(irqstat, cpu_base + GIC_CPU_EOI);
-#ifdef CONFIG_SMP
-            handle_IPI(irqnr, regs);
-#endif
-            continue;
-        }
-        break;
-    } while (1);
-}
-```
-
-### 通用框架：`kernel/irq/irqdesc.c`
-
-```c
+/* 通用入口：把 hwirq 翻译成 virq，再分发 */
 int __handle_domain_irq(struct irq_domain *domain, unsigned int hwirq,
                         bool lookup, struct pt_regs *regs)
 {
@@ -372,22 +152,18 @@ int __handle_domain_irq(struct irq_domain *domain, unsigned int hwirq,
     unsigned int irq = hwirq;
     int ret = 0;
 
-    irq_enter();
+    irq_enter();                       /* 进入硬中断上下文，preempt_count++ */
 
 #ifdef CONFIG_IRQ_DOMAIN
     if (lookup)
-        irq = irq_find_mapping(domain, hwirq);
+        irq = irq_find_mapping(domain, hwirq);   /* 查 irq_domain 映射表 */
 #endif
 
-    /*
-     * Some hardware gives randomly wrong interrupts.  Rather
-     * than crashing, do something sensible.
-     */
     if (unlikely(!irq || irq >= nr_irqs)) {
-        ack_bad_irq(irq);
+        ack_bad_irq(irq);              /* 硬件给出了错误的中断号 */
         ret = -EINVAL;
     } else {
-        generic_handle_irq(irq);
+        generic_handle_irq(irq);       /* 进入 irq_desc 分发 */
     }
 
     irq_exit();
@@ -397,18 +173,14 @@ int __handle_domain_irq(struct irq_domain *domain, unsigned int hwirq,
 ```
 
 ```c
+/* 退出中断：这里是"下半部"真正被触发的地方 */
 void irq_exit(void)
 {
-#ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
-    local_irq_disable();
-#else
-    WARN_ON_ONCE(!irqs_disabled());
-#endif
-
+    ...
     account_irq_exit_time(current);
-    preempt_count_sub(HARDIRQ_OFFSET);
+    preempt_count_sub(HARDIRQ_OFFSET);           /* 离开硬中断上下文 */
     if (!in_interrupt() && local_softirq_pending())
-        invoke_softirq();
+        invoke_softirq();                         /* 有软中断待处理就现在做 */
 
     tick_irq_exit();
     rcu_irq_exit();
@@ -416,39 +188,44 @@ void irq_exit(void)
 }
 ```
 
-### 旧内核接口：`arch/arm/kernel/irq.c`
+一句话概括这三个函数的分工：`__handle_domain_irq` **翻译**（hwirq→virq）、`generic_handle_irq` **分发**（找到 irq_desc 和对应的 flow handler）、`handle_irq_event` **执行**（挨个调用 action）。`irq_exit` 则顺手把下半部点火。
 
-`asm_do_IRQ` 是旧内核使用的：
+## 七、disable_irq 的坑
 
-```c
-asmlinkage void __exception_irq_entry
-asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
-{
-    handle_IRQ(irq, regs);
-}
+| API | 行为 | 什么时候用 |
+|---|---|---|
+| `disable_irq()` | 关闭中断，并**等正在执行的 handler 跑完**才返回 | 进程上下文，要确保 handler 不再访问资源时 |
+| `disable_irq_nosync()` | 关闭后立即返回，不等 | **中断上下文**里，或明确不需要等 |
 
-void handle_IRQ(unsigned int irq, struct pt_regs *regs)
-{
-    __handle_domain_irq(NULL, irq, false, regs);
-}
-```
+在中断处理函数里调 `disable_irq()` 是经典死锁：当前 handler 还没返回，而 `disable_irq` 就在等"当前 handler 结束"——互相等，永远不结束。这种情况只能用 `disable_irq_nosync()`。
 
-调用路径：
+那 `disable_irq()` 的"等待"有什么意义？两个真实场景：
 
-```
-asm_do_IRQ()
-    ↓
-handle_IRQ()
-    ↓
-__handle_domain_irq(NULL, irq, false, regs)
-    ↓
-irq_enter()
-    ↓
-irq_find_mapping()  (if lookup)
-    ↓
-generic_handle_irq(irq)
-    ↓
-irq_exit()
-```
+- **多核**：CPU0 正在 handler 里操作网卡资源，CPU1 想关中断并释放这块资源。不等的话，CPU0 可能在释放后继续访问，直接崩。
+- **卸载驱动**：`free_irq` 之前必须确保没有 handler 还在跑，否则访问的是已经被释放的内存。
 
-`irq_exit()` 中会检查是否有软中断待处理，如果有则调用 `invoke_softirq()` 执行下半部。
+`disable_irq_nosync()` 只是关掉"开关"，不释放任何资源；资源一直留到 `free_irq()`。
+
+## 八、中断上下文里不能做的事
+
+| 不能做 | 原因 | 替代 |
+|---|---|---|
+| `msleep`、`mutex_lock`、等信号量 | 中断上下文没有"进程"可调度，睡下去没人能把它叫醒 | 用 spinlock，或挪到下半部 |
+| `kmalloc(GFP_KERNEL)` | 可能睡眠等待内存 | 用 `GFP_ATOMIC`，或提前分配 |
+| 大块 I2C/SPI 传输 | 关中断时间过长，丢中断、抖动变大 | 线程化中断或 workqueue |
+| `copy_to_user` / `copy_from_user` | 可能缺页睡眠，且不能直接碰用户地址 | 挪到进程上下文 |
+| 调 `disable_irq()` | 自等死锁 | `disable_irq_nosync()` |
+
+## 九、两条常见误解
+
+**"驱动上报事件后，用户层 read 的数据就自动变成事件了？"**
+
+不是"自动变成"。`input_report_key()` 把事件塞进 input 子系统的事件队列，用户层 `read()` 读的是队列里的 `struct input_event`；中间的转换是 input 框架做的，不是数据的魔法变形。
+
+**"input 子系统简化了按键检测流程？"**
+
+它简化的是**驱动和应用之间的交互**，外加统一各类输入设备的事件模型；它并不减少 GPIO 检测、消抖、中断这些硬件侧的工作。所以它是软件架构层面的封装，不是硬件处理的替代品。
+
+## 十、一句话总结
+
+外设 → GIC → 同一个 IRQ 信号 → 汇编入口 → GIC 驱动读出 hwirq → `irq_domain` 翻译成 virq → `irq_desc` 按类型分发 → 驱动 handler；handler 只做最急的事，剩下的一半留给软中断、tasklet、workqueue 或线程化中断。
