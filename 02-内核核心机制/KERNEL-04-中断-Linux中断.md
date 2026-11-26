@@ -6,6 +6,7 @@
 - 在 CPU 眼里，所有外设中断都是**同一个 IRQ 信号**；进内核后才靠 GIC 读出的中断号 + `irq_domain` 映射，分发到某个驱动注册的函数。
 - 所以"中断号"有两套：硬件号（hwirq）和内核号（virq），中间那层映射是设备树的 `interrupt-parent` / `interrupts` 在起作用。
 - 中断上下文里**不能睡眠**。凡是"要等、要阻塞"的活，都得挪到下半部或线程化中断里去。
+- EOI 和 CPU 的 IRQ 掩码是两件事：EOI 写完不代表 CPU 开门，退出路径上唯一能被打断的窗口在软中断执行期间。
 
 ## 二、为什么要分上半部与下半部
 
@@ -190,7 +191,137 @@ void irq_exit(void)
 
 一句话概括这三个函数的分工：`__handle_domain_irq` **翻译**（hwirq→virq）、`generic_handle_irq` **分发**（找到 irq_desc 和对应的 flow handler）、`handle_irq_event` **执行**（挨个调用 action）。`irq_exit` 则顺手在这里把软中断（下半部）跑掉。
 
-## 七、disable_irq 的坑
+## 七、中断退出路径上，还能被打断吗
+
+常见误解：EOI 已经写了，硬件那头"复位"了，是不是就随时可能被新中断插进来？
+
+答案要分**两个开关**看：
+
+| 开关 | 谁控制 | 作用 |
+|---|---|---|
+| EOI（End Of Interrupt） | GIC | 宣告"这一路处理完"，该中断号才允许再次上报 |
+| CPSR.I（中断掩码位） | CPU | 决定 CPU 此刻收不收中断信号 |
+
+两者完全独立：**EOI 写完了，不代表 CPU 开门。**
+
+### 7.1 EOI 是什么时候写的
+
+```c
+/* kernel/irq/chip.c（简化示意，省略了判错与 oneshot 分支） */
+void handle_fasteoi_irq(struct irq_desc *desc)
+{
+    struct irq_chip *chip = desc->irq_data.chip;
+
+    ...
+    handle_irq_event(desc);              /* 先跑你的 handler */
+
+    ...
+    chip->irq_eoi(&desc->irq_data);      /* 再告诉 GIC：这一路结案 */
+}
+```
+
+顺序是**先处理、后 EOI**。所以在 handler 执行期间，这个中断号在 GIC 里处于 active 状态，同源中断不会被再次转发——这也是"handler 里没及时清标志，中断看起来丢了"的由来。
+
+> 不同 flow handler 顺序略有差异（`handle_level_irq` 是"先 mask → 处理 → 再 unmask"），但"处理完才允许同源再来"这个原则一致。
+
+### 7.2 但 CPU 还闭着中断门
+
+ARMv7 的入口代码，进来第一件事就是关 IRQ：
+
+```asm
+/* arch/arm/kernel/entry-armv.S（摘录） */
+    .macro  svc_entry, stack_hole=0, trace=1
+    ...
+    disable_irq                 @ cpsid i：整个内核处理期间 IRQ 不响
+    ...
+    .endm
+```
+
+`irq_exit()` 里也仍然是关着的：
+
+```c
+void irq_exit(void)
+{
+#ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
+    local_irq_disable();                       /* 确保 IRQ 关闭 */
+#endif
+    account_irq_exit_time(current);
+    preempt_count_sub(HARDIRQ_OFFSET);         /* 硬中断计数 -1 */
+    if (!in_interrupt() && local_softirq_pending())
+        invoke_softirq();                      /* 走到这一步才动下半部 */
+    ...
+}
+```
+
+于是从 EOI 到 `invoke_softirq()` 之间，新来的中断只能在 GIC 里挂着（pending），进不来。
+
+### 7.3 软中断那段是开着中断跑的
+
+```c
+/* kernel/softirq.c（简化示意） */
+asmlinkage __visible void __softirq_entry __do_softirq(void)
+{
+    ...
+    pending = local_softirq_pending();
+
+    __local_bh_disable_ip(_RET_IP_, SOFTIRQ_OFFSET);  /* 关下半部，硬中断不受影响 */
+    ...
+    set_softirq_pending(0);
+    local_irq_enable();                     /* ★ 硬中断在这里重新开门 */
+    h = softirq_vec;
+    while ((softirq_bit = ffs(pending))) {
+        ...
+        h->action(h);                       /* 软中断处理函数：可以被硬中断打断 */
+        ...
+    }
+    local_irq_disable();                    /* 收尾再关上 */
+    ...
+}
+```
+
+这解释了那个看着矛盾的结论：**软中断仍然不能睡（没有进程上下文），但可以被硬中断打断（中断门开着）。**
+
+### 7.4 时间线
+
+| 阶段 | GIC 状态 | CPU 掩码 | 新中断会被响应吗 |
+|---|---|---|---|
+| 你的 handler 执行中 | 未 EOI（active） | 关 | 否，同源根本不上报 |
+| EOI 写完，`irq_exit()` 里 | 已 EOI，可 pending | **仍关** | 否，只能挂着 |
+| `__do_softirq()` 执行中 | 可 pending | **开** | **是，立即打断** |
+| 软中断跑完，`local_irq_disable()` | — | 关 | 否 |
+| `iret`（从 SPSR 恢复 CPSR） | — | 开 | 是，回到被打断代码的原始状态 |
+
+### 7.5 嵌套能套多深
+
+- 硬中断 handler 内部 IRQ 是关的 → 普通 IRQ **只会在软中断之上套一层**，不会无限递归
+- 还能继续插进来的只有 **FIQ / NMI** 这类不可屏蔽中断
+- 所以 `preempt_count` 用一个计数就够了，而不是维护任意深度的嵌套栈
+
+### 7.6 为什么这么设计
+
+| 设计 | 好处 | 代价 |
+|---|---|---|
+| 硬中断不嵌套 | 内核栈深度可控，共享数据只需考虑"中断 vs 进程"两种上下文 | 高优先级中断也得等前一个 handler 跑完 |
+| 软中断开着中断跑 | 收尾工作不会把整机中断响应堵死，tick、网络、串口还能进来 | 软中断 handler 必须自己防"被硬中断打断" |
+
+所以软中断里操作共享数据，标准做法是 per-CPU 变量，或 `local_bh_disable()`——**关下半部不等于关硬中断**，这两件事别混。
+
+### 7.7 preempt_count 是怎么记这笔账的
+
+| 位段 | 谁 +1 |
+|---|---|
+| HARDIRQ | `irq_enter()` |
+| SOFTIRQ | `__local_bh_disable()` / 执行软中断 |
+| NMI | 进不可屏蔽中断 |
+| PREEMPT | `preempt_disable()`（关抢占的临界区） |
+
+`in_interrupt()` 的含义就是"前三个里任意一个非零"。所以 `irq_exit()` 里减完 HARDIRQ 才变假、进 `__do_softirq()` 又加 SOFTIRQ 变真——计数在来回跳，**但"在中断上下文"这个事实一直没断**。
+
+### 7.8 一句话记
+
+**EOI 管"控制器能不能再报"，CPSR.I 管"CPU 收不收"；退出路径上唯一开着门的窗口，是 `__do_softirq()` 里 `local_irq_enable()` 到 `local_irq_disable()` 之间。**
+
+## 八、disable_irq 的坑
 
 | API | 行为 | 什么时候用 |
 |---|---|---|
@@ -206,7 +337,7 @@ void irq_exit(void)
 
 `disable_irq_nosync()` 只是关掉"开关"，不释放任何资源；资源一直留到 `free_irq()`。
 
-## 八、中断上下文里不能做的事
+## 九、中断上下文里不能做的事
 
 | 不能做 | 原因 | 替代 |
 |---|---|---|
@@ -216,7 +347,7 @@ void irq_exit(void)
 | `copy_to_user` / `copy_from_user` | 可能缺页睡眠，且不能直接碰用户地址 | 挪到进程上下文 |
 | 调 `disable_irq()` | 自等死锁 | `disable_irq_nosync()` |
 
-## 九、两条常见误解
+## 十、两条常见误解
 
 **"驱动上报事件后，用户层 read 的数据就自动变成事件了？"**
 
@@ -226,6 +357,6 @@ void irq_exit(void)
 
 它简化的是**驱动和应用之间的交互**，外加统一各类输入设备的事件模型；它并不减少 GPIO 检测、消抖、中断这些硬件侧的工作。所以它是软件架构层面的封装，不是硬件处理的替代品。
 
-## 十、一句话总结
+## 十一、一句话总结
 
-外设 → GIC → 同一个 IRQ 信号 → 汇编入口 → GIC 驱动读出 hwirq → `irq_domain` 翻译成 virq → `irq_desc` 按类型分发 → 驱动 handler；handler 只做最急的事，剩下的一半留给软中断、tasklet、workqueue 或线程化中断。
+外设 → GIC → 同一个 IRQ 信号 → 汇编入口 → GIC 驱动读出 hwirq → `irq_domain` 翻译成 virq → `irq_desc` 按类型分发 → 驱动 handler；handler 只做最急的事，剩下的一半留给软中断、tasklet、workqueue 或线程化中断；而 EOI 之后到 `iret` 之前，新中断只能在 GIC 里挂着——退出路径上唯一开着中断门的窗口，是 `__do_softirq()` 里的那段 `local_irq_enable()`。
