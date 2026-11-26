@@ -71,6 +71,82 @@ OpenAI 生态里的写法：
 - `strict: true`：字段一个不多一个不少
 - `additionalProperties: false`：禁止模型自由发挥加字段——**这条不写，模型经常给你加一个 `notes`**
 
+### 信封层：哪个键必填、哪个能删（2026-11-26 实测）
+
+先看清层级，后面才不容易混：
+
+```json
+"response_format": {          // ① 协议层：请求体上的字段名，固定
+  "type": "json_schema",      // ② 类型标记：固定值
+  "json_schema": {            // ③ 信封：固定键名，必填
+    "name": "minutes",        // ④ 标识：必填，你起名
+    "strict": true,           // ⑤ 开关：可选
+    "schema": { ... }         // ⑥ 模板：必填，你自由设计
+  }
+}
+```
+
+**真正的“返回值定义”只存在于 ⑥**，前面五个都是把模板送去服务端的包装，模型输出里一个都不会出现。
+
+逐个删字段实测的结果（`qwen3.8-flash`、`compatible-mode/v1`）：
+
+| 键 | 性质 | 删/改之后 | 干什么用的 |
+|---|---|---|---|
+| `response_format` | 固定键名 | 不加就完全没有约束，模型自由发挥 | 声明“输出要受约束” |
+| `"type": "json_schema"` | **固定值** | 写成 `"json"` → `HTTP 400`，`'response_format.type' Invalid value` | 区分三档：`text` / `json_object` / `json_schema` |
+| `json_schema` | 固定键名 | 删掉、把 `schema` 提到同级 → `HTTP 400`，`'response_format.json_schema' is required` | 装 `name` / `strict` / `schema` 的容器，不能省 |
+| `name` | **必填** | 删掉 → `HTTP 400`，`Field required: parameters.response_format.json_schema.name` | schema 的标识，用于报错定位、日志检索、多 schema 区分 |
+| `strict` | **可选** | 删掉 → `HTTP 200`，但模型行为会变（见下） | 约束是“必须”还是“建议” |
+| `schema` | **必填** | 没有模板就无约束可谈 | 空白表格本体 |
+| `description`（信封内） | 可选 | 删掉 → 200，无影响 | 描述整份 schema 的用途 |
+| 自己乱加的键（如 `"foo": 123`） | 非法 | 实测 200，**被静默忽略** | 没有作用，别加 |
+
+所以信封层**一个都不能少的是这四个**：`type`、`json_schema`、`name`、`schema`。`strict` 不算协议要求，但算工程必备。
+
+> 容易混淆的一点：`required` 和 `additionalProperties` **不在信封层**，它们在 `schema` 里，属于“模板内部规矩”，下一节讲。
+
+`name` 的规矩，规范很严、服务端很松：
+
+| 测试写法 | 结果 |
+|---|---|
+| `"name": "my schema"`（带空格） | 200（OpenAI 规范不允许空格） |
+| `"name": "…80 个字符…"` | 200（规范上限 64） |
+| `"name": "会议纪要"`（中文） | 200（规范只允许字母数字 `_` `-`） |
+
+别拿这个宽松当福利：`name` 只影响日志和报错的可读性，写规范格式（`meeting_minutes` 这种）换平台时才不会突然 400。
+
+`strict` 的三种状态，差距在“模型态度”而不在结构：
+
+| 写法 | HTTP | 同一个“试着加个 note 字段”的提示词下的输出 |
+|---|---|---|
+| `strict: true` | 200 | `{"a": "明天开会"}`，干净，`note` 没出现 |
+| 不写 `strict` | 200 | `{"a": "整理：明天开会。备注：受 JSON schema 限制，无法额外添加 note 字段…"}` |
+| `strict: false` | 200 | `{"a": "明天开会（备注：待补充）"}` |
+
+三种情况下结构都没被破坏，但 `strict` 关掉后，约束从“解码器不许”退化成“模型自己忍着”——它会把你多要的内容硬塞进现有字段，或者干脆道歉。**所以永远显式写 `strict: true`。**
+
+删到最简、实测仍能跑的最小形态：
+
+```json
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "meeting_minutes",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "todos": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["title", "todos"],
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+**最小形态 = `type`（固定）+ `name`（必填）+ `schema`（模板）**，再补一个 `strict: true` 是工程建议。省掉 `strict` 换来的是字段内容被污染，不划算。
+
 ### 字段级定义：每对花括号，都是一个子 schema
 
 最容易看漏的一点：`properties` 里字段名后面那对 `{}` 不是备注，而是**这个字段自己的完整定义**，相当于把一个小 schema 挂在字段名下。里面写几条，这个字段就同时受几条约束。
@@ -272,6 +348,38 @@ or "maxContains", the type should not be "array".
 复现方法很简单：同一个提示词、只改 schema 里的一个关键字，跑两遍对比输出。比如想验 `maxLength`，就故意让模型写长一点，看它敢不敢超。
 
 > 本机还留着一个无界面的最小示例 `llm_structured_demo.py`（`--dry-run` 只打印请求体、不出网），专门用来做这类对照实验。
+
+### 顺便：HTTP 200 和 400 差在哪
+
+调 schema 时会频繁撞见这两个码，含义完全不同：
+
+| | 200 OK | 400 Bad Request |
+|---|---|---|
+| 谁出的问题 | 没有，一切正常 | **请求本身不合法**，在你这一侧就错了 |
+| 模型跑了吗 | 跑了 | **完全没跑**，服务端校验阶段就退了回来 |
+| 响应体长什么样 | `{"choices":[...],"usage":{...}}` | `{"error":{"message":"...","code":"..."}}`，**没有 `choices`** |
+| 该做什么 | 解析 `choices[0].message.content` | 读 `error.message` 改请求，**不要解析 `choices`** |
+
+一句话：**200 是“模型答完了”，400 是“你的请求没通过体检”。**
+
+`400` 是 schema 类问题最常见的出口，报错通常精确到字段：
+
+```
+Field required: parameters.response_format.json_schema.name
+'response_format.json_schema' is required when 'response_format.type' is 'json_schema'
+'response_format.type' Invalid value: 'json'
+Format error : the specific reason is as follows: When the schema contains the
+fields "uniqueItems", ...
+```
+
+这四句前面都实测拿到过，它们直接点名哪一层缺了什么，比猜测快得多。
+
+另外两个容易混的码：
+
+- **401**：key 不对（实测过，返回 `invalid_api_key`）。跟 schema 无关，是身份问题
+- **429**：限流或额度问题。唯一值得等待重试的 4xx
+
+工程上的判断顺序固定：**先看 `status`，不是 200 就直接打印 `error.message` 退出；只有 200 才去动 `choices`。** 反过来写（先 `json.loads` 再取 `choices`）在 400 时会抛 `KeyError`，把真正的原因盖掉。
 
 ## 六、两个容易搞混的问题
 
