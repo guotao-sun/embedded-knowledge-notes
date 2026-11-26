@@ -71,6 +71,84 @@ OpenAI 生态里的写法：
 - `strict: true`：字段一个不多一个不少
 - `additionalProperties: false`：禁止模型自由发挥加字段——**这条不写，模型经常给你加一个 `notes`**
 
+### 字段级定义：每对花括号，都是一个子 schema
+
+最容易看漏的一点：`properties` 里字段名后面那对 `{}` 不是备注，而是**这个字段自己的完整定义**，相当于把一个小 schema 挂在字段名下。里面写几条，这个字段就同时受几条约束。
+
+```json
+"title": {
+  "type": "string",
+  "description": "一句话标题，不超过 15 个字"
+}
+```
+
+也就是说，"这对花括号里的内容都是用来描述 `title` 的"——方向对，但**性质要分清**：里面混着两种东西。
+
+| 关键字 | 谁来读 | 性质 |
+|---|---|---|
+| `description` | 模型读，当成提示词 | **软约束**，不参与校验 |
+| `type` | 解码器读 | 硬约束 |
+| `enum` | 解码器读 | 硬约束 |
+| `items` | 解码器读（仅 `array`） | 硬约束 |
+| `properties` / `required` / `additionalProperties` | 解码器读（仅 `object`） | 硬约束 |
+
+只有 `description` 是"描述"，其余都是"约束"。
+
+### `description` 到底是什么
+
+它是最容易被当成注释的关键字，但它不是注释：
+
+1. **JSON 本身没有注释**。`//`、`#` 都是非法字符，写了就解析失败，`description` 是唯一合法的"说明区"
+2. **它会被原样序列化进请求体，真的送到模型面前**。模型会读这段话，当成这一栏的填写要求——它其实就是"藏在 schema 里的提示词"
+3. **它计入输入 token，也就是计入费用**。整份 schema 一次 200~400 token，其中相当一部分就是这些说明文字
+4. **它不参与校验**。写"不超过 15 字"，模型照样可能写 50 字（实测见第五节）
+
+同一件事，两种写法的强度差得很远：
+
+```json
+// 软：靠模型自觉，可能不守
+"priority": { "type": "string", "description": "只能是 高/中/低 三选一" }
+
+// 硬：解码器直接不给别的可能
+"priority": { "type": "string", "enum": ["高", "中", "低"] }
+```
+
+实测提示词要求"填成紧急或 P0"时，带 `enum` 的那个只能输出 `"高"`——这就是硬约束和软约束的差别。
+
+### 还能往里加别的吗
+
+能，可以叠加，多条同时生效：
+
+```json
+"priority": {
+  "type": "string",
+  "description": "任务紧急程度",
+  "enum": ["高", "中", "低"]
+},
+"tags": {
+  "type": "array",
+  "description": "标签，最多 3 个",
+  "items": { "type": "string" },
+  "maxItems": 3
+},
+"owner": {
+  "type": "object",
+  "description": "负责人",
+  "properties": {
+    "name": { "type": "string" },
+    "dept": { "type": "string" }
+  },
+  "required": ["name", "dept"],
+  "additionalProperties": false
+}
+```
+
+三个字段各自把"类型 + 说明 + 约束"叠在一起，互不冲突；嵌套对象用的是同一套规矩。
+
+需要注意的只有两类：一是别写 `uniqueItems`、`contains`、`minContains`、`maxContains`（会直接 400 打死请求）；二是别指望 `maxLength`、`minLength` 生效——这两类在第五节都有实测记录。
+
+工程上的经验是**`description` 和硬约束一起写最稳**：硬约束兜住结构，`description` 补语义。像"这个字段填会议主题，不要写成一句话摘要"这种要求，只能靠文字说，`enum` 表达不了。
+
 ## 三、完整可跑示例
 
 ```python
