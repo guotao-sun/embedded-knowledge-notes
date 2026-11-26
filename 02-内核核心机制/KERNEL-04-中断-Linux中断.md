@@ -204,23 +204,65 @@ void irq_exit(void)
 
 两者完全独立：**EOI 写完了，不代表 CPU 开门。**
 
-### 7.1 EOI 是什么时候写的
+### 7.1 EOI 到底由谁写、写在哪一步
+
+EOI 不是"退出中断时顺手做的事"，它是**每一次中断分发末尾、由中断控制器驱动**写的一条寄存器。完整位置见下：
+
+```text
+gic_handle_irq
+  ├─ readl(GIC_CPU_INTACK)                  ← ① 应答（ACK）：取中断号，同时置为 active
+  ├─ handle_domain_irq
+  │    ├─ generic_handle_irq
+  │    │    └─ handle_fasteoi_irq
+  │    │         ├─ handle_irq_event → action->handler()    ← ② 你的 handler
+  │    │         └─ chip->irq_eoi → gic_eoi_irq
+  │    │              └─ writel(GIC_CPU_EOI)                ← ③ 结束（EOI）：清 active
+  │    └─ irq_exit                          ← 注意：在 ③ 之后才执行
+  └─ svc_exit → iret
+```
+
+三件事别混：
+
+| 动作 | 读/写哪个寄存器 | 作用 |
+|---|---|---|
+| ACK | 读 `GIC_CPU_INTACK` | 取出中断号，并把该号标记为 active |
+| EOI | 写 `GIC_CPU_EOI` | 清掉 active，允许该号再次上报 |
+| （GICv2 EOImode=1） | 写 `GIC_CPU_DEACTIVATE` | 分两步结束：先优先级降级，再 deactivate |
+
+底层就是一条写寄存器：
 
 ```c
-/* kernel/irq/chip.c（简化示意，省略了判错与 oneshot 分支） */
+/* drivers/irqchip/irq-gic.c（简化示意） */
+static void gic_eoi_irq(struct irq_data *d)
+{
+    u32 irq = d->hwirq;
+
+    /* EOImode=1 时写 DEACTIVATE，否则写 EOI，二者都等于"这一路结案" */
+    writel_relaxed(irq, gic_data_cpu_base(&gic_data[0]) + GIC_CPU_EOI);
+}
+```
+
+而"谁调 `irq_eoi`"在 core 里只有一处：flow handler 把 `chip->irq_eoi` 当成函数指针调。GIC 给 SPI 注册的 flow handler 是 `handle_fasteoi_irq`，所以顺序永远固定：
+
+```c
+/* kernel/irq/chip.c（简化示意，省略判错分支） */
 void handle_fasteoi_irq(struct irq_desc *desc)
 {
     struct irq_chip *chip = desc->irq_data.chip;
 
     ...
-    handle_irq_event(desc);              /* 先跑你的 handler */
+    handle_irq_event(desc);              /* ①先跑你的 handler */
 
     ...
-    chip->irq_eoi(&desc->irq_data);      /* 再告诉 GIC：这一路结案 */
+    chip->irq_eoi(&desc->irq_data);      /* ②再 EOI，此时 handler 已经返回 */
 }
 ```
 
-顺序是**先处理、后 EOI**。所以在 handler 执行期间，这个中断号在 GIC 里处于 active 状态，同源中断不会被再次转发——这也是"handler 里没及时清标志，中断看起来丢了"的由来。
+由此得到三条结论：
+
+- **EOI 在 handler 之后、在 `irq_exit()` 之前**：`irq_exit` 是 `generic_handle_irq()` 返回后才调的，而 EOI 在 `generic_handle_irq()` 内部就写完了
+- **共享中断只 EOI 一次**：一个 `irq_desc` 上挂多条 `action`，`handle_irq_event` 全跑完后写一次 EOI
+- **电平触发要小心**：EOI 只是清 active，如果外设的电平还拉着，GIC 会立刻重新上报——所以 handler 里必须把中断源清掉，否则就是"中断风暴"
 
 > 不同 flow handler 顺序略有差异（`handle_level_irq` 是"先 mask → 处理 → 再 unmask"），但"处理完才允许同源再来"这个原则一致。
 
@@ -321,7 +363,127 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
 
 **EOI 管"控制器能不能再报"，CPSR.I 管"CPU 收不收"；退出路径上唯一开着门的窗口，是 `__do_softirq()` 里 `local_irq_enable()` 到 `local_irq_disable()` 之间。**
 
-## 八、disable_irq 的坑
+## 八、保存现场与恢复现场：到底在哪几行
+
+"保存现场"不是一条指令干完的，它分三段，**硬件只做了很小一部分**：
+
+| 阶段 | 谁做 | 保存了什么 | 位置 |
+|---|---|---|---|
+| ① 异常进入 | **硬件** | 只存两个：`CPSR → SPSR_irq`、返回地址 `→ LR_irq`；同时切到 IRQ 模式（用 IRQ 模式的私有 SP）。**通用寄存器一个都不存** | CPU |
+| ② `vector_stub` | 汇编 | 把 r0、LR_irq、SPSR_irq 三个值暂存到 IRQ 模式栈；然后借异常返回机制切到 SVC 模式 | `entry-armv.S` |
+| ③ `svc_entry` / `usr_entry` | 汇编 | 在当前任务的**内核栈**上开一个 `pt_regs` 帧（ARM32 是 72 字节），存 r0–r12、sp、lr、pc、cpsr；顺手关 IRQ | `entry-armv.S` |
+| ④ 内核处理 | C | handler、软中断、调度判定，可能改 `pt_regs`（如信号、系统调用返回值） | — |
+| ⑤ `svc_exit` | 汇编 | `msr spsr_cxsf` 恢复 CPSR，`ldmia r0, {r0 - pc}^` 一次恢复所有通用寄存器 + PC | `entry-armv.S` |
+| ⑥ 回到原处 | CPU | 已在原 PC、原模式继续执行 | — |
+
+**这就是和 Cortex-M 最大的差别**：Cortex-M 硬件自动压 8 个寄存器；ARM 只自动存 PC 和 CPSR，其余全靠软件（见 [中断对比](./KERNEL-05-中断-imx6ull与STM32中断对比.md) 的"上下文保存差异"）。
+
+### 8.1 第②步：vector_stub 先"占个位"
+
+```asm
+/* arch/arm/kernel/entry-armv.S（摘录，省略分支表细节） */
+    .macro  vector_stub, name, mode, correction=0
+    .align  5
+vector_\name:
+    .if \correction
+    sub     lr, lr, #\correction      @ 修正返回地址：ARM 流水线让 LR 偏 +4
+    .endif
+    @ 先把这三个值塞进 IRQ 模式栈（这时还没法用 C 栈）
+    stmia   sp, {r0, lr}              @ r0 和"被打断的 PC"
+    mrs     lr, spsr
+    str     lr, [sp, #8]              @ 被打断时的 CPSR
+
+    @ 伪造一个 SPSR，再借异常返回机制切到 SVC 模式
+    mrs     r0, cpsr
+    eor     r0, r0, #(\mode ^ SVC_MODE | PSR_ISETSTATE)
+    msr     spsr_cxsf, r0
+    mov     r0, sp
+    ldr     lr, [pc, lr, lsl #2]      @ 查分支表
+    movs    pc, lr                    @ ★ 跳进 __irq_usr 或 __irq_svc（同时完成模式切换）
+```
+
+注意最后那条 `movs pc, lr`：它把 SPSR 拷进 CPSR，于是 CPU 从 IRQ 模式切到 SVC 模式，同时跳到 `__irq_usr`（打断的是用户态）或 `__irq_svc`（打断的是内核态）。**"切模式"和"跳转"在这里是一条指令完成的。**
+
+### 8.2 第③步：svc_entry 在栈上摆出 pt_regs
+
+```asm
+/* arch/arm/kernel/entry-armv.S（摘录，省略了 unwind/trace 相关） */
+    .macro  svc_entry, stack_hole=0, trace=1
+    sub     sp, sp, #(S_FRAME_SIZE + \stack_hole - 4)   @ 开 72 字节的帧
+    ...
+    stmia   r7, {r2 - r4}              @ 存 r2~r4 以及 sp、lr
+    ...
+    add     r0, sp, #S_PC
+    stmia   r0, {r4 - r6}              @ 存 pc 与 cpsr
+    ...
+    disable_irq                        @ 关 IRQ：从这行起内核代码不被中断打断
+    .endm
+```
+
+帧的内存布局就是 `struct pt_regs`，oops 打印的那一屏寄存器就是它：
+
+```text
+低地址  r0  r1  r2  ...  r12  sp  lr  pc  cpsr   高地址
+        └────────── 18 个字（72 字节），ARM32 ──────────┘
+```
+
+两条路径的差别值得记住：
+
+- **打断用户态 → `__irq_usr` → `usr_entry`**：用户态的 SP 不能用，所以先把用户 sp/lr 也存进帧，帧建在**当前任务的内核栈**上
+- **打断内核态 → `__irq_svc` → `svc_entry`**：本来就跑在内核栈上，直接继续往下压帧
+
+这也解释了"为什么只有返回用户态时才容易触发调度"——只有 `__irq_usr` 那条路会走到 `ret_to_user`，那里才检查 `TIF_NEED_RESCHED`。
+
+### 8.3 第⑤步：svc_exit 一条指令恢复全部
+
+```asm
+/* arch/arm/kernel/entry-armv.S（摘录） */
+    .macro  svc_exit, rpsr, irq = 0
+    .if \irq != 0
+    @ IRQ 已关闭，无需再关
+    .else
+    disable_irq
+    .endif
+    ...
+    msr     spsr_cxsf, \rpsr           @ 把"被打断时的 CPSR"塞回 SPSR
+    ...
+    ldmia   r0, {r0 - pc}^             @ ★ 一次弹出 r0~r14 和 pc
+    .endm
+```
+
+最后那条 `ldmia ..., {r0 - pc}^` 是关键：
+
+- 普通 `ldmia` 只能恢复 r0–r14
+- 末尾的 `^` 表示"如果目标寄存器里包含 pc（r15），就顺便把 SPSR 恢复到 CPSR"——于是**寄存器组和状态寄存器在同一条指令里一起回来**，不需要 `msr cpsr` 再单独跳转
+
+`irq_exit()` 之后的 `enable_irq`（或 `ret_to_user` 路径里的恢复）才把 IRQ 掩码真正打开，这就是第七节时间线里"CPU 到 `iret` 才开门"那句话的落点。
+
+### 8.4 ARM64（RK3568）上的对应物
+
+64 位平台换了一套宏，但结构一样：
+
+```asm
+/* arch/arm64/kernel/entry.S（摘录） */
+el1_irq:
+    kernel_entry 1              @ 保存 x0~x29、lr、sp、elr_el1、spsr_el1 到 pt_regs
+    enable_da_f                 @ 放开调试异常、SError、FIQ；IRQ 位仍然关着
+    irq_handler                 @ → gic_handle_irq → … → 你的 handler
+    ...
+    kernel_exit 1               @ 恢复上面那一整套，eret 回原处
+```
+
+差别在于：ARM64 没有"IRQ 模式私有栈"这一层，`kernel_entry` 直接在当前栈上建帧；寄存器更多（31 个通用 + SP + ELR + SPSR），帧也更大，浮点/SIMD 状态另由 C 代码按需保存。
+
+### 8.5 想看真实的现场，从哪看
+
+```bash
+dmesg | tail            # oops/panic 打印的 "PC is at ..." 和寄存器表就是 pt_regs
+cat /proc/interrupts    # 每个 virq 的计数与名字，确认中断到底进没进
+```
+
+内核里对应的打印函数是 `show_regs(regs)`，参数就是中断/异常入口建好的那个 `pt_regs`。
+
+## 九、disable_irq 的坑
 
 | API | 行为 | 什么时候用 |
 |---|---|---|
@@ -337,7 +499,7 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
 
 `disable_irq_nosync()` 只是关掉"开关"，不释放任何资源；资源一直留到 `free_irq()`。
 
-## 九、中断上下文里不能做的事
+## 十、中断上下文里不能做的事
 
 | 不能做 | 原因 | 替代 |
 |---|---|---|
@@ -347,7 +509,7 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
 | `copy_to_user` / `copy_from_user` | 可能缺页睡眠，且不能直接碰用户地址 | 挪到进程上下文 |
 | 调 `disable_irq()` | 自等死锁 | `disable_irq_nosync()` |
 
-## 十、两条常见误解
+## 十一、两条常见误解
 
 **"驱动上报事件后，用户层 read 的数据就自动变成事件了？"**
 
@@ -357,6 +519,6 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
 
 它简化的是**驱动和应用之间的交互**，外加统一各类输入设备的事件模型；它并不减少 GPIO 检测、消抖、中断这些硬件侧的工作。所以它是软件架构层面的封装，不是硬件处理的替代品。
 
-## 十一、一句话总结
+## 十二、一句话总结
 
 外设 → GIC → 同一个 IRQ 信号 → 汇编入口 → GIC 驱动读出 hwirq → `irq_domain` 翻译成 virq → `irq_desc` 按类型分发 → 驱动 handler；handler 只做最急的事，剩下的一半留给软中断、tasklet、workqueue 或线程化中断；而 EOI 之后到 `iret` 之前，新中断只能在 GIC 里挂着——退出路径上唯一开着中断门的窗口，是 `__do_softirq()` 里的那段 `local_irq_enable()`。
