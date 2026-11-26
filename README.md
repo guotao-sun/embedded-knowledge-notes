@@ -118,6 +118,7 @@
 - [滑动窗口协议（Sliding Window Protocol）学习笔记](./11-网络通信/NET-03-传输层-滑动窗口与GBN.md)
 - [HTTP 与 TCP 的分工：urlopen 什么时候建连、什么时候关 笔记](./11-网络通信/NET-04-应用层-HTTP与TCP的分工.md)
 - [socket 与 TCP/IP 的关系 笔记](./11-网络通信/NET-05-socket与协议栈的关系.md)
+- [read() 到底做了什么：内核代收、ACK、窗口与反压 笔记](./11-网络通信/NET-06-传输层-接收窗口与反压.md)
 
 ### 12-Python
 
