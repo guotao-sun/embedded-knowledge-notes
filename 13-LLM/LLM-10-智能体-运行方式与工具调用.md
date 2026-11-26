@@ -93,6 +93,56 @@ Action: ...
 
 现在的做法是：**function calling 负责"行动"，ReAct 式的"思考"被挪进模型内部**——思考模式返回的 `reasoning_content` 就是它的现代替代形态（见 [API 调用基础](./LLM-01-接口-API调用基础.md) 里响应体的双通道）。模型先在思考通道里推理，再在正式通道里给出 `tool_calls`，格式由协议层保证，比文本正则可靠得多。
 
+### ReAct Loop 与 Agent Loop 到底差在哪
+
+这两个词经常被当成同义词，其实**不在同一个层面上**：
+
+- **Agent Loop** 说的是"循环怎么转"——请求、判断要不要执行、把结果回填、再请求。它属于控制流。
+- **ReAct** 说的是"循环里每一步怎么想"——先写 `Thought`，再写 `Action`，等 `Observation`。它属于认知策略（提示词层面）。
+
+一句话：**Agent Loop 是容器，ReAct 是容器里的一种装法。** 换一种装法（只允许结构化 `tool_calls`、不要求写 Thought），容器照样转，只是不再是 ReAct。
+
+逐项对照：
+
+| 维度 | Agent Loop | ReAct |
+|---|---|---|
+| 来源 | 工程实践里的泛称，没有单一出处 | 2022 年论文提出的提示词方法 |
+| 解决什么问题 | 一次回答不够，要能多步调工具 | 纯推理会编事实、纯行动没规划 |
+| 动作怎么表示 | 不限：`tool_calls` 或文本都行 | 必须是文本 `Action: tool[args]` |
+| 推理是否显式 | 不要求，模型可以不说理由直接调 | 强制每步写 `Thought:` |
+| 谁来解析动作 | 协议层（JSON） | 程序自己用正则抠文本 |
+| 终止条件 | 没有 `tool_calls` | `Action: Finish[...]` |
+| 典型失败模式 | 参数错、字段缺、死循环 | 格式跑偏（少个冒号）就崩 |
+| 可观测性 | 默认看不到推理 | 天然有完整 Thought 轨迹 |
+
+四种组合都真实存在：
+
+| 组合 | 动作表示 | 典型出处 |
+|---|---|---|
+| 原始 ReAct | 文本 `Thought/Action` + 正则解析 | 论文、教学 demo |
+| 结构化 ReAct | `tool_calls` + 要求先写一句理由 | 多数生产级 agent |
+| 纯 tool calling | 只有 `tool_calls`，无显式 Thought | 本项目这版 |
+| CodeAct | 把动作换成写一段 Python | smolagents 的 CodeAgent |
+
+**判别方法**（比记定义好用）：把"每步必须写理由"这条约束删掉，看循环还能不能跑。
+
+- 能跑，只是少一段日志 → 骨架是 Agent Loop，ReAct 只是可选策略
+- 跑不了，因为要靠正则从文本里找 `Action:` → 实现本身绑定了 ReAct
+
+本项目的循环属于前者：删掉 `reasoning_content` 的打印，逻辑一行都不用改。所以它是 **Agent Loop + 纯 tool calling 策略**，不是 ReAct 实现。
+
+常见的混淆来自营销口径：文档里"ReAct agent"泛指"会调工具的 agent"。严格说，一个字面上成立的 ReAct 实现要同时满足两条——**每步有显式推理段**、**动作以文本形式产生并由宿主解析**。只满足"多步调工具"的，只是 Agent Loop。
+
+顺带说明三组概念的关系，它们并不冲突，只是三个不同视角：
+
+| 概念 | 视角 |
+|---|---|
+| ReAct | 认知模式：推理与行动交错 |
+| Agent Loop | 工程形态：`for step` + 请求 + 执行 + 回填 |
+| 状态机 / 图 | 调度形态：把 `if` 抽成边、状态外置，换来中断恢复与人工介入 |
+
+LangGraph 的 `create_react_agent` 是"用图实现的 ReAct"，smolagents 的 `ToolCallingAgent` 是"用结构化协议实现的 ReAct"，`CodeAgent` 是"用代码当动作的 ReAct"——三个实现共用同一个容器。
+
 ### 一个具体例子：把一个 C 库移植到 ARM 板子上
 
 | 步 | 思考 | 行动 | 观察 |
