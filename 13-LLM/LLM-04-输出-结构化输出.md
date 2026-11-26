@@ -144,17 +144,56 @@ print(data["title"], data["todos"])
 
 建议把"schema 能否被接受"做成启动自检，别等线上第一批请求才发现模型不支持。
 
-## 五、Schema 的边界与限制
+## 五、Schema 子集：哪些真约束、哪些被忽略（2026-11-26 实测）
 
-JSON Schema 标准很大，但模型厂商只实现了子集，实际可用范围通常限制在：
+厂商文档只写"支持 JSON Schema 子集"，但**"接受"和"生效"是两件完全不同的事**：有的关键字写进去照常 200，却一点都不约束；有的直接把请求打死。
 
-- 根节点必须是 `object`
-- 每个 `properties` 里的字段都建议列进 `required`
-- **不支持递归结构**
-- `pattern`、`format`、`minimum` 之类常常被忽略（写了也不校验，只是不报错）
-- 嵌套层级过深容易触发服务端错误
+下面这张表是实测出来的，不是文档摘抄。
 
-所以工程上的经验是：**schema 越扁平越稳**。深嵌套不如拆成两次调用。
+测试条件：`qwen3.8-flash`、`compatible-mode/v1`、`strict: true`、非流式、`temperature: 0.3`。
+
+| 关键字 | 写在哪 | 结果 | 怎么验证的 |
+|---|---|---|---|
+| `enum` | string 字段 | **强制生效** | 提示词要求填"紧急"/"P0"，输出只能是 `"高"` |
+| `pattern` | string 字段 | **强制生效** | 写 `^[0-9]{1,3}$`，输出 `"202"`，中文标题被拦下 |
+| `format`（如 `date`） | string 字段 | **强制生效** | 提示词明说"用中文写法、不要横杠"，仍输出 `2026-11-26` |
+| `minimum` / `maximum` | number 字段 | **强制生效** | 限定 1~5，用户说"我觉得 90 分"，输出被夹成 `1` |
+| `maxItems` | array 字段 | **强制生效** | 要求列 5 条待办、限 2 条，输出只有 2 条 |
+| `additionalProperties: false` | object | **强制生效** | 提示词要求"额外加一个 note 字段"，结果没加 |
+| `type` | 任意 | **强制生效** | 类型不符的 token 直接被解码器排除 |
+| `minLength` / `maxLength` | string 字段 | **静默忽略** | `maxLength: 5` 实际输出 53 字；`minLength: 30` 实际输出 21 字，全程 200 |
+| `uniqueItems` / `contains` / `minContains` / `maxContains` | array 字段 | **直接 400** | 见下方原始报错 |
+
+`uniqueItems` 的原始报错值得原样抄下来——是**主动拒绝**，不是忽略：
+
+```
+HTTP 400  invalid_parameter_error
+When the schema contains the fields "uniqueItems", "contains", "minContains",
+or "maxContains", the type should not be "array".
+```
+
+还有一条常被当成铁律的说法，实测被推翻：**根节点不必是 `object`**。
+
+把 schema 写成 `{"type":"array","items":{"type":"string"}}`，服务端正常返回：
+
+```json
+["测试完成", "上线评审通过", "文档补齐"]
+```
+
+`json.loads` 出来直接是 list，没有任何问题。
+
+不过工程上仍建议根节点用 `object` 包一层（`{"items":[...]}` 而不是裸数组）：将来要加 `title`、`updated_at` 这类元信息时不用改协议，兼容成本更低。
+
+### 这张表怎么用
+
+1. **能用硬约束就别靠提示词**：`enum`、`pattern`、`format`、`minimum`、`maxItems` 都是真的，比在 `description` 里写"不超过 15 字"强得多
+2. **长度类约束只能靠 `description`**：`maxLength` 是空头承诺，写了也只是给模型看的建议
+3. **别写 `uniqueItems`**：一个关键字就能让整个请求 400
+4. **换模型或换平台后重新测一遍**：这张表是 `qwen3.8-flash` 的口径，不同模型背后的约束解码器实现不一样
+
+复现方法很简单：同一个提示词、只改 schema 里的一个关键字，跑两遍对比输出。比如想验 `maxLength`，就故意让模型写长一点，看它敢不敢超。
+
+> 本机还留着一个无界面的最小示例 `llm_structured_demo.py`（`--dry-run` 只打印请求体、不出网），专门用来做这类对照实验。
 
 ## 六、两个容易搞混的问题
 
