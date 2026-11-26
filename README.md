@@ -124,6 +124,7 @@
 - [Python 入门学习问答合集](./12-Python/Python学习问答合集.md)
 - [Python 异常处理与文件读写问答](./12-Python/Python异常处理与文件读写问答.md)
 - [Python 模块与包问答](./12-Python/Python模块与包问答.md)
+- [Python 网络请求问答](./12-Python/Python网络请求问答.md)
 - [Python 对象模型笔记：名字是标签，对象是实物](./12-Python/python-object-model-notes.md)
 
 ### 13-LLM
