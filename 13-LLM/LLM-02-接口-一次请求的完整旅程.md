@@ -149,6 +149,63 @@ data = json.loads(resp.choices[0].message.content)
 
 它长得像 JSON，但只是文本。`json.loads` 把这个字符串**解析**成 Python 字典，纯本地 CPU 运算。不做这一步，`data["title"]` 就无从谈起——这是最容易漏的一步。
 
+### 先看状态行，再谈 `choices`
+
+响应报文第一行是状态行：`HTTP/1.1 200 OK`。
+
+- **200**：模型答完了。响应体里有 `choices`，可以往下读
+- **400**：请求本身不合法，服务端在**校验阶段就退回来了，模型根本没跑**。响应体里只有 `error`，**没有 `choices`**
+
+所以顺序永远是：先看 `resp.status_code`，不是 200 就打印 `resp.text` 退出；只有 200 才去碰 `choices`。反过来写（先 `json.loads` 再取 `choices`）在 400 时会抛 `KeyError`，把真正的原因盖掉。
+
+200 和 400 的逐项对比见 [结构化输出](./LLM-04-输出-结构化输出.md) 第五节末尾。
+
+### `choices[0].message.content` 逐段拆
+
+响应体的完整形状：
+
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "created": 1795653945,
+  "model": "qwen3.8-flash",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": { "role": "assistant", "content": "{\"title\":\"...\"}" }
+    }
+  ],
+  "usage": { "prompt_tokens": 34, "completion_tokens": 401, "total_tokens": 435 }
+}
+```
+
+四段拆开看：
+
+| 写法 | 是什么 | 为什么这么写 |
+|---|---|---|
+| `choices` | **数组**（列表） | 接口支持 `n` 参数，一次要多个候选，所以结果天生是列表 |
+| `[0]` | 取**第一个**元素 | Python 索引从 0 开始；`n=1` 时永远只有这一个 |
+| `.message` | 该候选的消息对象 | 形如 `{"role":"assistant","content":"..."}` |
+| `.content` | 消息文本 | 这里是**字符串**，长得像 JSON 但需要 `json.loads` |
+
+用字典写法对照，一模一样的路径：
+
+```python
+payload["choices"][0]["message"]["content"]
+```
+
+`resp.choices[0].message.content` 只是 SDK 把字典包成了对象，`.choices` 就是 `["choices"]`，`[0]` 还是列表下标，后面继续点下去而已。
+
+`n=1` 时可以直接取 `[0]`，但顺手看一眼 `finish_reason` 更稳——它告诉你这次是正常结束还是被 `max_tokens` 截断：
+
+```python
+choice = resp.choices[0]
+if choice.finish_reason == "length":
+    print("output truncated, raise max_tokens")
+```
+
 ## 六、想亲眼看到"什么时候发的"
 
 | 办法 | 做法 | 能看到什么 |
