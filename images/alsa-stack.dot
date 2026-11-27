@@ -1,0 +1,47 @@
+digraph G {
+  rankdir=TB;
+  bgcolor="white";
+  dpi=200;
+  nodesep=0.45;
+  ranksep=0.5;
+  node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=18, penwidth=1.1, margin="0.22,0.14"];
+  edge [color="#8a8a8a", arrowsize=0.7, penwidth=1.2];
+
+  u1 [label="aplay / arecord / tinyplay", fillcolor="#dbe8fb", color="#5b8dd6"];
+  u2 [label="alsa-lib（libasound）\nsnd_pcm_open / writei / readi", fillcolor="#dbe8fb", color="#5b8dd6"];
+
+  c1 [label="ALSA Core\nPCM Core", fillcolor="#dcf0e2", color="#4e9c6a"];
+  c2 [label="Control Core\n音量 / 开关 / 路由", fillcolor="#dcf0e2", color="#4e9c6a"];
+  c3 [label="Timer / RawMIDI / Seq", fillcolor="#dcf0e2", color="#4e9c6a"];
+
+  a1 [label="ASoC Core\nsoc-core / soc-pcm", fillcolor="#fdf0d5", color="#c99a3c"];
+  a2 [label="DAPM\n电源与路径管理", fillcolor="#fdf0d5", color="#c99a3c"];
+  a3 [label="snd_soc_pcm_runtime\nDAI 与 PCM 的绑定", fillcolor="#fdf0d5", color="#c99a3c"];
+
+  m1 [label="Machine Driver\ndai_link：把三者绑起来", fillcolor="#efe3f5", color="#8e6bb0"];
+  m2 [label="CPU DAI Driver\nSAI / I2S 控制器", fillcolor="#efe3f5", color="#8e6bb0"];
+  m3 [label="Codec Driver\nWM8960 / WM8994", fillcolor="#efe3f5", color="#8e6bb0"];
+
+  hw [label="硬件数据路径\n内存 DMA → SAI（BCLK / LRCLK / DATA）→ Codec DAC/ADC → 耳机 / 喇叭 / MIC",
+      fillcolor="#ececec", color="#777777", width=7.2];
+
+  { rank=same; u1; u2; }
+  { rank=same; c1; c2; c3; }
+  { rank=same; a1; a2; a3; }
+  { rank=same; m1; m2; m3; }
+
+  u1 -> u2 [style=invis];
+  c1 -> c2 [style=invis];
+  c2 -> c3 [style=invis];
+  a1 -> a2 [style=invis];
+  a2 -> a3 [style=invis];
+  m1 -> m2 [style=invis];
+  m2 -> m3 [style=invis];
+
+  u2 -> c1 [label=" ioctl / mmap / read / write"];
+  c1 -> a1 [label=" snd_pcm_ops 落到 ASoC 回调"];
+  a1 -> m1 [label=" 实例化 dai_link"];
+  m1 -> hw [label=" platform_name（DMA）", style=dashed];
+  m2 -> hw [style=dashed];
+  m3 -> hw [style=dashed];
+}

@@ -1,0 +1,19 @@
+digraph G {
+  rankdir=TB;
+  bgcolor="white";
+  dpi=200;
+  nodesep=0.5;
+  ranksep=0.38;
+  node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=17, penwidth=1.1, margin="0.26,0.15"];
+  edge [color="#8a8a8a", arrowsize=0.75, penwidth=1.2];
+
+  s1 [label="① 打开设备  snd_pcm_open(\"hw:0,0\", PLAYBACK)\n内核：snd_pcm_open_substream → 建 snd_pcm_runtime", fillcolor="#dbe8fb", color="#5b8dd6"];
+  s2 [label="② 设硬件参数  snd_pcm_hw_params()\n内核：按 hw_params 分配 DMA 缓冲、确定 period / buffer 大小", fillcolor="#dbe8fb", color="#5b8dd6"];
+  s3 [label="③ 循环写数据  snd_pcm_writei(buf, period_size)\n内核：copy_from_user → 写 appl_ptr → 触发 DMA", fillcolor="#dcf0e2", color="#4e9c6a"];
+  s4 [label="④ 收尾  snd_pcm_drain() + snd_pcm_close()\n内核：等最后一个 period 播完 → 释放 DMA 与 runtime", fillcolor="#efe3f5", color="#8e6bb0"];
+
+  s1 -> s2;
+  s2 -> s3;
+  s3 -> s4;
+  s3 -> s3 [label=" 没写完就继续\n（DMA 每完成一个 period 会腾出空间）", fontsize=14, color="#4e9c6a", style=bold];
+}

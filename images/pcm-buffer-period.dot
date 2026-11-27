@@ -1,0 +1,31 @@
+digraph G {
+  rankdir=TB;
+  bgcolor="white";
+  dpi=200;
+  nodesep=0.5;
+  ranksep=0.6;
+  node [fontname="Noto Sans CJK SC", fontsize=17, penwidth=1.2];
+  edge [color="#8a8a8a", arrowsize=0.7, penwidth=1.1];
+
+  app [shape=note, style="filled", fillcolor="#dbe8fb", color="#5b8dd6",
+       label="appl_ptr：应用 writei 写到的位置\n（应用自己推进）"];
+  hw  [shape=note, style="filled", fillcolor="#fdf0d5", color="#c99a3c",
+       label="hw_ptr：DMA 正在播的位置\n（硬件推进，每过一个 period 触发一次中断）"];
+
+  buf [shape=plaintext, label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="12">
+      <TR>
+        <TD BGCOLOR="#dcf0e2" PORT="p0">P0</TD>
+        <TD BGCOLOR="#cfe9d8" PORT="p1">P1</TD>
+        <TD BGCOLOR="#ececec" PORT="p2">P2</TD>
+        <TD BGCOLOR="#ececec" PORT="p3">P3（播完回绕 P0）</TD>
+      </TR>
+    </TABLE>>];
+
+  app -> buf:p1 [label=" 已写入", style=dashed];
+  hw  -> buf:p2 [label=" 正在播", style=dashed];
+
+  note2 [shape=note, style="filled", fillcolor="#fffbe6", color="#c9b458", fontsize=15,
+         label="buffer 大小 = period_size × periods\n上例：1024 帧 × 16 段 = 16384 帧"];
+  buf -> note2 [style=invis];
+}
