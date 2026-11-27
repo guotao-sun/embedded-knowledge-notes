@@ -66,8 +66,8 @@
 
 - [Linux 源码顶层结构](./05-编译与构建系统/BUILD-01-源码-Linux源码顶层结构.md)
 - [Kconfig 讲解](./05-编译与构建系统/BUILD-02-配置-Kconfig讲解.md)
-- [imx6ull 芯片内核编译](./05-编译与构建系统/BUILD-03-编译-imx6ull内核编译.md)
-- [i.MX6ULL 编译 Linux 内核 / 驱动模块 / 应用](./05-编译与构建系统/BUILD-04-编译-iMX6ULL内核驱动应用.md)
+- [imx6ull 内核增量编译](./05-编译与构建系统/BUILD-03-编译-imx6ull内核编译.md)
+- [i.MX6ULL 编译 Linux 内核（全流程与烧写）](./05-编译与构建系统/BUILD-04-编译-iMX6ULL内核驱动应用.md)
 - [RK3568 编译 Linux 内核 / 驱动模块 / 应用](./05-编译与构建系统/BUILD-05-编译-RK3568内核驱动应用.md)
 - [Linux 驱动编译流程](./05-编译与构建系统/BUILD-06-编译-驱动编译流程.md)
 - [imx6ull Linux 驱动 Makefile 模板](./05-编译与构建系统/BUILD-07-Makefile-驱动Makefile模板.md)

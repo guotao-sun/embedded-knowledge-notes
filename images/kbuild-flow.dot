@@ -1,0 +1,35 @@
+digraph kbuild {
+  graph [rankdir=TB, dpi=200, bgcolor="white", nodesep=0.35, ranksep=0.38,
+         fontname="Noto Sans CJK SC", pad=0.25];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=13, color="#8a8a8a", penwidth=1.0, margin="0.16,0.10"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=11];
+
+  kconfig [label=<<b>Kconfig（每个目录一个）</b><br/>config 项 / 依赖 / 菜单 / source 包含>, fillcolor="#dbe8fb"];
+  defcfg  [label=<<b>板级 defconfig</b><br/>BSP 给的默认配置>, fillcolor="#dbe8fb"];
+
+  tool [label=<<b>scripts/kconfig 配置工具</b><br/>menuconfig / oldconfig / defconfig>, fillcolor="#efe3f5"];
+
+  dotcfg [label=<<b>.config</b><br/>CONFIG_X=y  CONFIG_Y=m<br/># CONFIG_Z is not set>, fillcolor="#dcf0e2"];
+
+  sync [label=<<b>conf --syncconfig</b><br/>把 .config 拆成两份视图>, fillcolor="#efe3f5"];
+
+  autoconf [label=<<b>include/config/auto.conf</b><br/>给 Makefile 的变量表>, fillcolor="#dcf0e2"];
+  autogen  [label=<<b>include/generated/autoconf.h</b><br/>给 C 代码的宏 #define>, fillcolor="#dcf0e2"];
+
+  mk [label=<<b>各目录 Makefile</b><br/>obj-$(CONFIG_X) += foo.o>, fillcolor="#fdf0d5"];
+  expand [label=<<b>展开结果</b><br/>=y → obj-y（编进内核）<br/>=m → obj-m（编成模块）<br/>未设 → 空，不编>, fillcolor="#fdf0d5"];
+
+  out [label=<<b>编译产物</b><br/>vmlinux / Image / zImage / *.ko>, fillcolor="#ececec"];
+
+  kconfig -> tool [label="读"];
+  defcfg  -> tool [label="读"];
+  tool    -> dotcfg [label="写"];
+  dotcfg  -> sync;
+  sync    -> autoconf [label="同名变量表"];
+  sync    -> autogen  [label="同名宏"];
+  autoconf -> mk [label="被 include"];
+  mk -> expand;
+  expand  -> out [label="进构建"];
+  autogen -> out [label="#ifdef 生效", style=dashed];
+}

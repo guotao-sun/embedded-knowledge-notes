@@ -1,0 +1,20 @@
+digraph rkimage {
+  graph [rankdir=LR, dpi=200, bgcolor="white", nodesep=0.30, ranksep=0.40,
+         fontname="Noto Sans CJK SC", pad=0.25];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=12, color="#8a8a8a", penwidth=1.0, margin="0.14,0.10"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  kernel [label=<<b>① 编译 kernel/</b><br/>./build.sh kernel<br/>→ arch/arm64/boot/Image<br/>→ rk3568.dtb>, fillcolor="#dbe8fb"];
+
+  mkfit [label=<<b>② 打成 FIT 容器</b><br/>mk-fitimage.sh + boot.its<br/>把 Image / dtb / resource 塞在一起>, fillcolor="#efe3f5"];
+  bootimg [label=<<b>boot.img</b><br/>一个文件里含 kernel+fdt+resource<br/>可选 RSA 签名>, fillcolor="#dcf0e2"];
+
+  part [label=<<b>③ scp 后 dd 进 boot 分区</b><br/>/dev/mmcblk0p3<br/>分区号以 parameter.txt 为准>, fillcolor="#fdf0d5"];
+  uboot [label=<<b>reboot → U-Boot</b><br/>从 boot 分区读 FIT<br/>验签 → 取出 Image 与 dtb>, fillcolor="#ececec"];
+
+  kernel -> mkfit [label="Image + dtb"];
+  mkfit -> bootimg [label="生成"];
+  bootimg -> part [label="拷到板子"];
+  part -> uboot [label="重启后"];
+}
