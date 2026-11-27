@@ -16,7 +16,7 @@ Kconfig（定义有哪些选项、依赖谁） → menuconfig 问你 → .config
 Kconfig → .config → Makefile → 编译产物
 ```
 
-![Kconfig 到编译产物的完整链路](../images/kbuild-flow.png)
+![Kconfig 到编译产物的完整链路](images/kbuild-flow.png)
 
 图里最关键的一句话：**`.config` 里的 `CONFIG_xxx` 会被"复制"两遍**——一份变成 Makefile 的变量（决定编不编），一份变成 C 的宏（决定代码里 `#ifdef` 走哪条分支）。两边不一致时，就会出现"文件编进去了但代码没生效"这种怪事。
 

@@ -10,7 +10,7 @@ U-Boot 启动内核，不管用哪条命令，本质都是**准备三样东西�
 | 设备树 dtb | 同上（RK 已打进 `boot.img`；i.MX 是独立 `.dtb`） |
 | 启动参数 bootargs | `setenv bootargs ...`，U-Boot 会把它塞进 dtb 的 `/chosen/bootargs` |
 
-![从 U-Boot 敲命令到内核接手的五步](../images/uboot-bootz.png)
+![从 U-Boot 敲命令到内核接手的五步](images/uboot-bootz.png)
 
 两种镜像形态对应两种命令：
 

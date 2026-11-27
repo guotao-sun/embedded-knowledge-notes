@@ -68,7 +68,7 @@ snd_soc_card（Machine 注册的那张卡）
 
 ## 四、frame / period / buffer
 
-![PCM 环形缓冲与 period](../images/pcm-buffer-period.png)
+![PCM 环形缓冲与 period](images/pcm-buffer-period.png)
 
 三个概念的关系：
 
@@ -116,7 +116,7 @@ snd_pcm_sw_params_set_stop_threshold(pcm, sw, buffer_size);   /* 溢出时停 */
 
 ## 六、放音四步
 
-![PCM 放音四步：用户态调用与内核动作](../images/alsa-playback-flow.png)
+![PCM 放音四步：用户态调用与内核动作](images/alsa-playback-flow.png)
 
 1. **open**：`snd_pcm_open("hw:0,0", PLAYBACK)` → 内核建 `snd_pcm_runtime`，此时还没有缓冲
 2. **hw_params**：定参数 → 内核按 period/buffer 分配 DMA 内存（`snd_pcm_lib_malloc_pages`）

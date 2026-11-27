@@ -23,7 +23,7 @@ Linux 根目录下的每个目录，回答的是**不同的问题**：
 
 ### 四个视图，指向同一棵树
 
-![sysfs 的四个视图：bus / class / dev 都是 devices 的符号链接](../images/sysfs-views.png)
+![sysfs 的四个视图：bus / class / dev 都是 devices 的符号链接](images/sysfs-views.png)
 
 ```text
 /sys/devices/             ← 唯一真实的树（按物理挂接关系）

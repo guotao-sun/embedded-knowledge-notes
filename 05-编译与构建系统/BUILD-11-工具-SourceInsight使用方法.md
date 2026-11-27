@@ -10,7 +10,7 @@ Source Insight 的价值只有一个：**在几万文件的内核源码里，两
 编码能正确显示中文   →  跳转/返回键顺手  →  引用高亮能开
 ```
 
-![Source Insight 主界面：左边项目树、中间代码、右边 Relation 关系窗口](../images/image27.png)
+![Source Insight 主界面：左边项目树、中间代码、右边 Relation 关系窗口](images/image27.png)
 
 图里能看出它的核心布局：左边 Project/File 树用于按目录浏览内核源码（`drivers/spi/` 这种层级），右边 **Relation Window** 在光标停到某个结构体/函数时自动列出"谁引用了我"，底部是当前符号的定义预览。
 

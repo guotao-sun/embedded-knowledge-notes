@@ -12,7 +12,7 @@
 
 五层，依赖方向**只能向下**：
 
-![MCU 分层的五层结构与依赖方向](../images/mcu-layers.png)
+![MCU 分层的五层结构与依赖方向](images/mcu-layers.png)
 
 ## 二、每层到底管什么
 

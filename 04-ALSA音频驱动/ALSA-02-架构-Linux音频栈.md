@@ -15,7 +15,7 @@ Linux 音频是**两个框架叠在一起**：
 
 ## 二、整体分层
 
-![Linux 音频栈：用户态到硬件](../images/alsa-stack.png)
+![Linux 音频栈：用户态到硬件](images/alsa-stack.png)
 
 从上往下读这张图：
 

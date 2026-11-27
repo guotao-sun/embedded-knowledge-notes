@@ -10,7 +10,7 @@ mk-fitimage.sh           → 把 Image+dtb+resource 打成一个 boot.img
 scp + dd 到 boot 分区     → 重启，U-Boot 读 FIT
 ```
 
-![RK3568 从编译到启动的镜像链](../images/rk3568-image-chain.png)
+![RK3568 从编译到启动的镜像链](images/rk3568-image-chain.png)
 
 记住三个"和 i.MX6ULL 不一样"的地方：
 

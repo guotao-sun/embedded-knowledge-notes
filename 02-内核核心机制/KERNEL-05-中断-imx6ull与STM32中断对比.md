@@ -15,7 +15,7 @@
 
 一句话记：**STM32 是"一个中断一个门"，Linux 是"所有中断一个门，进门再按号找人"**。
 
-![STM32 与 Linux 中断路径对比](../images/kernel-irq-compare.png)
+![STM32 与 Linux 中断路径对比](images/kernel-irq-compare.png)
 
 *图：左边硬件分发、右边软件分发；两边都在中断入口处保存现场，区别是"谁保存、保存到哪"。*
 

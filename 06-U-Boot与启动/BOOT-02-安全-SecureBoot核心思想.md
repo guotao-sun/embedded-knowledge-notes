@@ -28,7 +28,7 @@ Secure Boot 要保证的唯一一件事：
 
 ## 三、信任链长什么样
 
-![Secure Boot 的信任链：每一级只验下一级](../images/secure-boot-chain.png)
+![Secure Boot 的信任链：每一级只验下一级](images/secure-boot-chain.png)
 
 读这张图只记住三句话：
 

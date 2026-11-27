@@ -12,7 +12,7 @@ input 子系统是 Linux 内核中统一管理输入设备（按键、鼠标、�
 
 ## 二、架构图
 
-![input 子系统架构](../images/image32.png)
+![input 子系统架构](images/image32.png)
 
 图里从左到右的每一栏，对应代码里的一层：
 

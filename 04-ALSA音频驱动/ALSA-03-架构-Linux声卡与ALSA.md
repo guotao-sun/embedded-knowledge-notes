@@ -50,7 +50,7 @@ card0（一块板子的音频系统）
 
 ## 四、声卡是怎么出现的
 
-![ASoC 声卡注册流程](../images/asoc-card-register.png)
+![ASoC 声卡注册流程](images/asoc-card-register.png)
 
 五步走完，用户态才能 `open`：
 

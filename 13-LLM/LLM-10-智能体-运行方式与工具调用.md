@@ -22,7 +22,7 @@ system prompt（身份、规则）
 
 模型回的也不是"哪个技能"，而是 `tool_calls` 或最终文本。所以流程图更接近：
 
-![Agent Loop 一次循环的完整路径](../images/agent-loop-flow.png)
+![Agent Loop 一次循环的完整路径](images/agent-loop-flow.png)
 
 *图：从提问到工具回填的完整路径。③ 是唯一"出网"的一步，⑤、⑥ 都在本地完成；虚线回到 ②，就是"再发一次请求"。（图源：`images/agent-loop-flow.dot`，Graphviz 渲染）*
 

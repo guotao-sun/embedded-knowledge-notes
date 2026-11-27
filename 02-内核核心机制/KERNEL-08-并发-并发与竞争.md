@@ -78,7 +78,7 @@ typedef struct {
 
 内核还提供 `set_bit` / `clear_bit` / `test_and_set_bit` 这一组，用于按位操作标志位（一个 32 位变量可以当 32 个开关用）。
 
-![原子位操作](../images/image4.png)
+![原子位操作](images/image4.png)
 
 ## 四、自旋锁
 

@@ -18,7 +18,7 @@ Linux 的图形系统，本质就是**操作显示设备这个普通外设**：�
 
 ## 二、一条像素到屏幕的路
 
-![从应用到屏幕：DRM 对象与数据流](../images/drm-object-model.png)
+![从应用到屏幕：DRM 对象与数据流](images/drm-object-model.png)
 
 四步，缺一不可：
 

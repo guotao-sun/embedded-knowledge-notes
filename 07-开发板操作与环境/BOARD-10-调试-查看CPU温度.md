@@ -53,7 +53,7 @@ cat /sys/class/thermal/thermal_zone0/type
 
 温度不只是给人看的，**内核会拿它做保护动作**：
 
-![thermal 框架：传感器 → zone → governor → cooling device](../images/thermal-framework.png)
+![thermal 框架：传感器 → zone → governor → cooling device](images/thermal-framework.png)
 
 四个角色：
 

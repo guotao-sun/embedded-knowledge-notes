@@ -13,7 +13,7 @@
 
 一句话记：**FreeRTOS 是"再开一个中断来切换"，Linux 是"借返回的顺风车切换"**。
 
-![STM32 与 Linux 调度对比](../images/image26.png)
+![STM32 与 Linux 调度对比](images/image26.png)
 
 *图：两边的调度路径对比。*
 
