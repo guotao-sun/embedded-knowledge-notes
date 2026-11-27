@@ -73,7 +73,7 @@
 - [imx6ull Linux 驱动 Makefile 模板](./05-编译与构建系统/BUILD-07-Makefile-驱动Makefile模板.md)
 - [编译设备树](./05-编译与构建系统/BUILD-08-设备树-编译设备树.md)
 - [编译 imx6ull Linux 应用 app](./05-编译与构建系统/BUILD-09-应用-编译imx6ull应用.md)
-- [嵌入式 Linux 编译工具链的不同](./05-编译与构建系统/BUILD-10-工具链-编译工具链区别.md)
+- [嵌入式 Linux 编译工具链的区别](./05-编译与构建系统/BUILD-10-工具链-编译工具链区别.md)
 - [Source Insight 使用方法](./05-编译与构建系统/BUILD-11-工具-SourceInsight使用方法.md)
 
 ### 06-U-Boot与启动
