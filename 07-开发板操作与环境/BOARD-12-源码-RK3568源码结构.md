@@ -20,11 +20,12 @@ RK3568 的"源码"不是一份内核源码，而是**一整套 SDK**，分三层
 
 | 产物 | 源码在哪 | 编出来的文件 | 烧到哪 |
 |---|---|---|---|
-| **U-Boot 设备树** | `u-boot/arch/arm/dts/rk3568-*.dts` | `u-boot.dtb` | 随 `uboot.img` 一起 |
-| **内核设备树** | `kernel/arch/arm64/boot/dts/rockchip/rk3568-*.dts` | `rk3568-*.dtb` | 打进 `boot.img`（FIT 容器） |
-| **U-Boot** | `u-boot/` | `uboot.img` | `uboot` 分区 |
+| **设备树** | `kernel/arch/arm64/boot/dts/rockchip/rk3568-*.dts` | `rk3568-*.dtb` | 打进 `boot.img`（FIT 容器） |
+| **U-Boot** | `u-boot/` | `uboot.img`（正文与它自己的 dtb 已打包在一起） | `uboot` 分区 |
 | **内核** | `kernel/` | `Image`（放进 FIT） | `boot` 分区 |
 | **根文件系统** | `buildroot/`（配置 + overlay + 包） | `rootfs.img` | `rootfs` 分区 |
+
+注意：U-Boot 也有自己的一份设备树，但它**不单独算一个产物**——打包时它和 U-Boot 正文被合成同一个 `uboot.img`，烧写对象只有 U-Boot 一个（见下节）。
 
 对应到 `parameter.txt` 里的分区，大致是 `uboot` / `trust` / `boot` / `rootfs` / `userdata`——**具体顺序、偏移、大小以你板子的 `parameter.txt` 为准**，不同 SDK 版本会差。
 
@@ -54,6 +55,41 @@ RK3568 的"源码"不是一份内核源码，而是**一整套 SDK**，分三层
 | `bootargs` 的 `root=` 与真实分区名 | 内核起来但 panic：`Unable to mount root fs` |
 
 一句话记：**U-Boot 的 dts 决定"能不能把内核搬起来"，内核的 dts 决定"起来之后外设能不能用"。**
+
+### 打包环节：两段合成一个 uboot.img
+
+两份 dts 虽然分别编译，但**到镜像这一层就合并了**：
+
+```text
+u-boot/arch/arm/dts/rk3568-*.dts
+        │  编译
+        ▼
+u-boot.dtb  ──┐
+              ├──►  make.sh 打包  ──►  uboot.img  ──►  uboot 分区
+u-boot-nodtb.bin（正文）┘
+```
+
+RK 的 `make.sh` 最后会把 U-Boot 正文和 dtb 打进同一个 `uboot.img`：
+
+- SPL + FIT 方案：`make u-boot.itb`，FIT 里是 `u-boot-nodtb.bin` + `u-boot.dtb`（+ trust 二进制）
+- miniloader 方案：`tools/loaderimage --pack --uboot u-boot.bin uboot.img $SYS_TEXT_BASE`
+
+由此有三条实践结论：
+
+| 结论 | 说明 |
+|---|---|
+| 编译产物是两个文件，烧写产物是一个 | `u-boot-nodtb.bin` + `u-boot.dtb` 便于单独替换调试，但上板只认 `uboot.img` |
+| 改 U-Boot 的 dts 必须重跑 `./build.sh uboot` 并重烧 `uboot` 分区 | 只编内核、只烧 `boot.img` 完全不会更新它 |
+| 内核的 dtb 走另一条路 | 它和内核 `Image` 一起进 `boot.img` 的 FIT，和 `uboot.img` 无关 |
+
+验证镜像里到底装了什么：
+
+```bash
+dumpimage -l output/firmware/uboot.img      # FIT 会列出 uboot / fdt 节点
+fdtdump output/firmware/uboot.img | head -40
+```
+
+想确认"生效的是哪份 dts"，改一个看得见的字串（如 `model`），U-Boot 打印与 `cat /proc/device-tree/model` 各看一次即可分辨。
 
 ## 三、SDK 顶层
 
@@ -184,4 +220,4 @@ ls drivers/gpu/drm/rockchip/
 
 ## 八、一句话总结
 
-**烧进板子的只有四样：设备树（U-Boot 一份、内核一份）、U-Boot、内核、根文件系统；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
+**烧进板子的只有四样：设备树（内核那份，进 `boot.img`）、U-Boot（正文与自己的 dtb 合成 `uboot.img`）、内核、根文件系统；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
