@@ -12,28 +12,34 @@ RK3568 的"源码"不是一份内核源码，而是**一整套 SDK**，分三层
 
 先记一句：**编译入口永远是顶层的 `./build.sh`，不是 `make`。**
 
-换成"最终固件"的视角，这一整套 SDK 只产出**四样东西**：设备树、U-Boot、内核、根文件系统（见下一节）。
+换成"最终固件"的视角：SDK 提供的**内容**是四样——设备树、U-Boot、内核、根文件系统；但**烧写对象**是三个镜像，不是四个（见下一节）。
 
-## 二、产物视角：烧进去的其实是四样东西
+## 二、产物视角：内容四样，镜像三个
 
-从"板子上到底被烧了什么"往回倒推，SDK 的责任就四块：
+从"板子上到底被烧了什么"往回倒推，最容易搞错的是**"内容"与"镜像"不是一一对应**：
 
-| 产物 | 源码在哪 | 编出来的文件 | 烧到哪 |
-|---|---|---|---|
-| **设备树** | `kernel/arch/arm64/boot/dts/rockchip/rk3568-*.dts` | `rk3568-*.dtb` | 打进 `boot.img`（FIT 容器） |
-| **U-Boot** | `u-boot/` | `uboot.img`（正文与它自己的 dtb 已打包在一起） | `uboot` 分区 |
-| **内核** | `kernel/` | `Image`（放进 FIT） | `boot` 分区 |
-| **根文件系统** | `buildroot/`（配置 + overlay + 包） | `rootfs.img` | `rootfs` 分区 |
+| 烧写对象 | 里面装什么 | 源码在哪 | 编译产物 | 打包成 | 烧到哪 |
+|---|---|---|---|---|---|
+| loader / trust | DDR 初始化、SPL（miniloader）、ATF | `rkbin/`（+ `u-boot/` 的 SPL） | `u-boot-spl.bin`、DDR bin、`bl31.elf` | `idbloader.img`、`trust.img` | 分区起始处 / `trust` 分区 |
+| **U-Boot** | U-Boot 正文 + 它自己的 dtb | `u-boot/` | `u-boot-nodtb.bin` + `u-boot.dtb` | `uboot.img`（FIT） | `uboot` 分区 |
+| **boot** | 内核 `Image` + **内核 dtb** + resource | `kernel/` | `Image`、`rk3568-*.dtb` | `boot.img`（FIT 里的 kernel / fdt / resource） | `boot` 分区 |
+| **rootfs** | 一整个根文件系统 | `buildroot/`（configs + overlay + 包） | rootfs 目录树 | `rootfs.img` | `rootfs` 分区 |
 
-注意：U-Boot 也有自己的一份设备树，但它**不单独算一个产物**——打包时它和 U-Boot 正文被合成同一个 `uboot.img`，烧写对象只有 U-Boot 一个（见下节）。
+原来那种"设备树、U-Boot、内核、rootfs 各占一行"的写法有三处容易误读，这里分开说清：
 
-对应到 `parameter.txt` 里的分区，大致是 `uboot` / `trust` / `boot` / `rootfs` / `userdata`——**具体顺序、偏移、大小以你板子的 `parameter.txt` 为准**，不同 SDK 版本会差。
+| 容易搞错的地方 | 实际 |
+|---|---|
+| "编出来的文件"当成一行 | 编译只出 `u-boot-nodtb.bin`、`Image`、rootfs 目录树；`uboot.img`/`boot.img`/`rootfs.img` 都是**打包**（mkimage / `make.sh`）出来的 |
+| 设备树、内核算两个烧写对象 | 内核 dtb 和 `Image` 在**同一个** `boot.img` 里（FIT 的 `kernel`、`fdt`、`resource` 三个节点），板子上只有一个 `boot` 分区 |
+| 忘了 loader 这一段 | BootROM 只认 `idbloader`，DDR 初始化在它里面；DDR 不起来，U-Boot 根本轮不到 |
 
-还有一样不在这四块里：`rkbin/` 里的 **loader**（DDR 初始化 + miniloader/ATF）。BootROM 先跑它，DDR 起来之后才轮到 U-Boot。它基本是预编译二进制、日常不改，但换 DDR 颗粒、改启动介质这类事必须动它。
+分区名与偏移以你板子的 `parameter.txt` 为准（常见 `uboot` / `trust` / `boot` / `rootfs` / `userdata`），不同 SDK 版本会差。
+
+`rkbin/` 里的 loader 基本是预编译二进制、日常不改，但换 DDR 颗粒、改启动介质这类事必须动它。
 
 ### 源码里有两份 dts，产物上只算一份
 
-上面表里的"设备树"指的是**内核那份**（它单独打进 `boot.img`）。但源码里还有一份是给 U-Boot 用的，**它不单独产出、也不单独烧**——没有"一个统一的设备树目录"，两份 dts 分散在两个地方：
+上表里 `boot.img` 装的 dtb 是**内核那份**。源码里还有一份是给 U-Boot 用的，**它不单独产出、也不单独烧**——没有"一个统一的设备树目录"，两份 dts 分散在两个地方：
 
 | | U-Boot 那份 dts | 内核那份 dts |
 |---|---|---|
@@ -221,4 +227,4 @@ ls drivers/gpu/drm/rockchip/
 
 ## 八、一句话总结
 
-**烧进板子的只有四样：设备树（内核那份，进 `boot.img`）、U-Boot（正文与自己的 dtb 合成 `uboot.img`）、内核、根文件系统；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
+**内容是四样（`uboot.img`、`boot.img`（内核 Image + 内核 dtb + resource）、`rootfs.img`，再加前面的 loader），烧写对象是三个镜像；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
