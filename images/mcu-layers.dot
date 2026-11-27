@@ -1,0 +1,25 @@
+digraph layers {
+  graph [rankdir=TB, dpi=200, bgcolor="white", nodesep=0.25, ranksep=0.30,
+         fontname="Noto Sans CJK SC", pad=0.28];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=11, color="#8a8a8a", penwidth=1.0, margin="0.16,0.09"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  app  [label=<<b>APP 层</b>　业务逻辑：采样、控制、通信协议>, fillcolor="#dbe8fb"];
+  svc  [label=<<b>SERVICE 层（可选）</b>　日志、协议栈、参数管理、文件系统>, fillcolor="#efe3f5"];
+  os   [label=<<b>OS 层</b>　RTOS / 裸机调度：任务、延时、队列、临界区>, fillcolor="#efe3f5"];
+  board[label=<<b>BOARD 层</b>　唯一知道「哪根引脚、哪个实例」的地方>, fillcolor="#fdf0d5"];
+  drv  [label=<<b>DRIVER 层</b>　一类设备的通用逻辑（LED、UART、I2C 器件）>, fillcolor="#dcf0e2"];
+  hal  [label=<<b>HAL 层</b>　只碰寄存器：读写、位域、时钟使能>, fillcolor="#ececec"];
+  hw   [label=<<b>芯片 / 外设</b>　寄存器、引脚、总线>, fillcolor="#ffffff", color="#c0c0c0"];
+
+  app -> svc [label="调用"];
+  svc -> os [label="调用"];
+  os -> board [label="调用"];
+  board -> drv [label="安装实例"];
+  drv -> hal [label="调用"];
+  hal -> hw [label="读写寄存器", style=dashed];
+
+  bad [label=<<b>✗ 反向 / 跨层依赖</b><br/>HAL 直接调 APP、DRIVER 里写死引脚号>, fillcolor="#f7dcdc", color="#c97070"];
+  hal -> bad [color="#c97070", fontcolor="#c97070", style=dashed, label="禁止"];
+}
