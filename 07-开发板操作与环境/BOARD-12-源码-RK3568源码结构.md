@@ -12,15 +12,15 @@ RK3568 的"源码"不是一份内核源码，而是**一整套 SDK**，分三层
 
 先记一句：**编译入口永远是顶层的 `./build.sh`，不是 `make`。**
 
-换成"最终固件"的视角：SDK 提供的**内容**是四样——设备树、U-Boot、内核、根文件系统；但**烧写对象**是三个镜像，不是四个（见下一节）。
+换成"最终固件"的视角：SDK 提供的**内容**是四样——设备树、U-Boot、内核、根文件系统；但**烧写对象**是三个镜像（前面还有 loader），不是四个（见下一节）。
 
 ## 二、产物视角：内容四样，镜像三个
 
 从"板子上到底被烧了什么"往回倒推，最容易搞错的是**"内容"与"镜像"不是一一对应**：
 
-| 烧写对象 | 里面装什么 | 源码在哪 | 编译产物 | 打包成 | 烧到哪 |
+| 烧写对象 | 里面装什么 | 源码在哪 | 编/拿到的文件 | 打包成 | 烧到哪 |
 |---|---|---|---|---|---|
-| loader / trust | DDR 初始化、SPL（miniloader）、ATF | `rkbin/`（+ `u-boot/` 的 SPL） | `u-boot-spl.bin`、DDR bin、`bl31.elf` | `idbloader.img`、`trust.img` | 分区起始处 / `trust` 分区 |
+| loader / trust | DDR 初始化、SPL（或 miniloader）、ATF | `rkbin/` + `u-boot/` 里的 SPL | `u-boot-spl.bin`（自己编）、DDR bin 与 `bl31.elf`（rkbin 自带） | `idbloader.img`、`trust.img` | 裸扇区（通常 32KB 偏移处，不在分区表里）/ `trust` 分区 |
 | **U-Boot** | U-Boot 正文 + 它自己的 dtb | `u-boot/` | `u-boot-nodtb.bin` + `u-boot.dtb` | `uboot.img`（FIT） | `uboot` 分区 |
 | **boot** | 内核 `Image` + **内核 dtb** + resource | `kernel/` | `Image`、`rk3568-*.dtb` | `boot.img`（FIT 里的 kernel / fdt / resource） | `boot` 分区 |
 | **rootfs** | 一整个根文件系统 | `buildroot/`（configs + overlay + 包） | rootfs 目录树 | `rootfs.img` | `rootfs` 分区 |
@@ -31,7 +31,7 @@ RK3568 的"源码"不是一份内核源码，而是**一整套 SDK**，分三层
 |---|---|
 | "编出来的文件"当成一行 | 编译只出 `u-boot-nodtb.bin`、`Image`、rootfs 目录树；`uboot.img`/`boot.img`/`rootfs.img` 都是**打包**（mkimage / `make.sh`）出来的 |
 | 设备树、内核算两个烧写对象 | 内核 dtb 和 `Image` 在**同一个** `boot.img` 里（FIT 的 `kernel`、`fdt`、`resource` 三个节点），板子上只有一个 `boot` 分区 |
-| 忘了 loader 这一段 | BootROM 只认 `idbloader`，DDR 初始化在它里面；DDR 不起来，U-Boot 根本轮不到 |
+| 忘了 loader 这一段 | BootROM 只认带 RK 头的 loader 镜像（`idbloader.img` 或 `MiniLoaderAll.bin`），DDR 初始化在它里面；DDR 不起来，U-Boot 根本轮不到 |
 
 分区名与偏移以你板子的 `parameter.txt` 为准（常见 `uboot` / `trust` / `boot` / `rootfs` / `userdata`），不同 SDK 版本会差。
 
@@ -106,7 +106,7 @@ rk3568_linux_sdk/
 ├── Makefile
 ├── device/               # 板级配置：BoardConfig-*.mk、parameter.txt、分区表
 │   └── rockchip/rk356x/
-├── kernel/               # 内核源码（4.19.x）+ make.sh
+├── kernel/               # 内核源码（4.19.x，新 SDK 为 5.10）+ make.sh
 │   └── arch/arm64/boot/dts/rockchip/   # 内核那份设备树
 ├── u-boot/               # U-Boot 源码
 │   └── arch/arm/dts/     # U-Boot / SPL 那份设备树
@@ -158,18 +158,25 @@ rk3568_linux_sdk/
 RK 的显示子系统（DRM）是你查"屏幕不亮/花屏"的地方：
 
 ```text
-drivers/gpu/drm/
-├── drm_core.c        # DRM 核心框架（设备、文件、ioctl 分发）
-├── drm_ioctl.c       # ioctl 实现（用户态 modetest/合成器进来的入口）
-├── drm_plane.c       # 平面（Plane）：一个图层
-├── drm_crtc.c        # 显示控制器（CRTC）：时序、扫描输出
-├── drm_connector.c   # 连接器：HDMI/DSI/DP/EDP 与面板的连接
-├── drm_encoder.c     # 编码器：TMDS/DSI 打包
-└── rockchip/
-    ├── rockchip_drm_drv.c   # RK DRM 驱动入口（probe、组件绑定）
-    ├── rockchip_vop.c       # VOP（视频输出处理器，图层合成、缩放）
-    ├── dw-mipi-dsi.c        # DesignWare MIPI DSI 控制器
-    └── dw-hdmi.c            # DesignWare HDMI 控制器
+drivers/gpu/drm/                     ← 通用 DRM 核心（与芯片无关）
+├── drm_drv.c        # 注册 DRM 设备、建立 /dev/dri/card0
+├── drm_ioctl.c      # 用户态 ioctl 入口（modetest/合成器都走这里）
+├── drm_atomic.c     # atomic 状态检查与一次性提交
+├── drm_plane.c      # 平面（Plane）：一个图层
+├── drm_crtc.c       # 显示控制器（CRTC）：时序、扫描输出
+├── drm_connector.c  # 连接器：HDMI/DSI/DP/eDP 与面板的连接
+├── drm_encoder.c    # 编码器：TMDS/DSI 打包
+├── panel/           # 各种屏幕驱动（panel-simple.c 等）
+├── bridge/synopsys/ # DesignWare 通用控制器
+│   ├── dw-mipi-dsi.c
+│   └── dw-hdmi.c
+└── rockchip/        ← RK 平台相关
+    ├── rockchip_drm_drv.c      # RK 入口：probe、component 绑定
+    ├── rockchip_drm_vop.c      # VOP1：图层合成、缩放
+    ├── rockchip_drm_vop2.c     # VOP2：**RK3568 用的是这个**
+    ├── rockchip_drm_gem.c      # 显存分配（GEM）
+    ├── dw-mipi-dsi-rockchip.c  # DSI 的 RK 侧粘合（时钟、PHY、初始化序列）
+    └── dw-hdmi-rockchip.c      # HDMI 的 RK 侧粘合
 ```
 
 按"一条像素走的路"记这几个文件最清楚：
@@ -182,16 +189,19 @@ drivers/gpu/drm/
 
 | 文件 | 一句话职责 |
 |---|---|
-| `drm_core.c` | 建立 `/dev/dri/card0`、管理 DRM 设备生命周期 |
-| `drm_ioctl.c` | 用户态所有 DRM 命令的入口（含 atomic commit） |
+| `drm_drv.c` | 注册 card、建立 `/dev/dri/card0` |
+| `drm_ioctl.c` | 用户态所有 DRM 命令的入口 |
+| `drm_atomic.c` | atomic 提交：先把所有属性检查一遍，再一次性生效 |
 | `drm_plane.c` | 图层的属性（位置、格式、缩放） |
 | `drm_crtc.c` | 时序（h/v sync、像素时钟）与扫描输出 |
 | `rockchip_drm_drv.c` | 把 VOP/DSI/HDMI 作为 component 绑成一个 card |
-| `rockchip_vop.c` | RK 特有的图层合成硬件（多窗口叠加、alpha） |
-| `dw-mipi-dsi.c` | MIPI DSI 时序与命令发送（点屏必调） |
-| `dw-hdmi.c` | HDMI 的 EDID、TMDS、音频回传 |
+| `rockchip_drm_vop2.c` | RK3568 的图层合成硬件（多窗口叠加、alpha、缩放） |
+| `dw-mipi-dsi-rockchip.c` | DSI 时钟、PHY、初始化序列（点屏必调） |
+| `dw-hdmi-rockchip.c` | HDMI 的 RK 侧粘合；通用协议在 `bridge/synopsys/dw-hdmi.c` |
 
-**"屏幕背光亮但黑屏"** 通常卡在 `dw-mipi-dsi.c`（DSI 初始化序列/时钟）或设备树里的 panel 节点；**"完全没 `/dev/dri`"** 则是 `rockchip_drm_drv.c` 的 probe 失败，看 `dmesg | grep -i drm`。
+文件名以你 SDK 里 `ls drivers/gpu/drm/rockchip/ | grep -E "vop|dw"` 的结果为准——不同 BSP 版本在连字符/下划线、`_vop2` 的命名上会有些差异。
+
+**"屏幕背光亮但黑屏"** 通常卡在 `dw-mipi-dsi-rockchip.c`（初始化序列/时钟）或设备树里的 panel 节点；**"完全没 `/dev/dri`"** 则是 `rockchip_drm_drv.c` 的 probe 失败，看 `dmesg | grep -i drm`。
 
 ## 六、内核里其它常用目录（RK 版）
 
@@ -201,7 +211,7 @@ kernel/
 ├── arch/arm64/boot/Image             # 编出来的未压缩内核
 ├── drivers/
 │   ├── gpu/drm/rockchip/             # 显示
-│   ├── media/                        # V4L2、ISP、编解码（rkvenc/rkvdec）
+│   ├── media/                        # V4L2、ISP、编解码（位置随版本，也可能在 video/rockchip/）
 │   ├── mmc/                          # eMMC/SD
 │   ├── net/ethernet/                 # GMAC
 │   └── soc/rockchip/                 # RK 平台专用（pm_domain、grf、saradc）
@@ -213,6 +223,8 @@ kernel/
 ## 七、定位一个文件的三步
 
 ```bash
+cd kernel/            # 下面几条都在内核根目录执行
+
 # 1. 用 compatible 找驱动（最可靠）
 grep -rn "rockchip,rk3568-vop" drivers/gpu/drm/rockchip/
 
@@ -227,4 +239,4 @@ ls drivers/gpu/drm/rockchip/
 
 ## 八、一句话总结
 
-**内容是四样（`uboot.img`、`boot.img`（内核 Image + 内核 dtb + resource）、`rootfs.img`，再加前面的 loader），烧写对象是三个镜像；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
+**内容是四样（设备树、U-Boot、内核、根文件系统），落到三个镜像上（`uboot.img`、`boot.img`、`rootfs.img`，前面还有 loader 的 `idbloader`/`trust`）；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
