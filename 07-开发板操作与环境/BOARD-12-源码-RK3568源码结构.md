@@ -12,7 +12,50 @@ RK3568 的"源码"不是一份内核源码，而是**一整套 SDK**，分三层
 
 先记一句：**编译入口永远是顶层的 `./build.sh`，不是 `make`。**
 
-## 二、SDK 顶层
+换成"最终固件"的视角，这一整套 SDK 只产出**四样东西**：设备树、U-Boot、内核、根文件系统（见下一节）。
+
+## 二、产物视角：烧进去的其实是四样东西
+
+从"板子上到底被烧了什么"往回倒推，SDK 的责任就四块：
+
+| 产物 | 源码在哪 | 编出来的文件 | 烧到哪 |
+|---|---|---|---|
+| **U-Boot 设备树** | `u-boot/arch/arm/dts/rk3568-*.dts` | `u-boot.dtb` | 随 `uboot.img` 一起 |
+| **内核设备树** | `kernel/arch/arm64/boot/dts/rockchip/rk3568-*.dts` | `rk3568-*.dtb` | 打进 `boot.img`（FIT 容器） |
+| **U-Boot** | `u-boot/` | `uboot.img` | `uboot` 分区 |
+| **内核** | `kernel/` | `Image`（放进 FIT） | `boot` 分区 |
+| **根文件系统** | `buildroot/`（配置 + overlay + 包） | `rootfs.img` | `rootfs` 分区 |
+
+对应到 `parameter.txt` 里的分区，大致是 `uboot` / `trust` / `boot` / `rootfs` / `userdata`——**具体顺序、偏移、大小以你板子的 `parameter.txt` 为准**，不同 SDK 版本会差。
+
+还有一样不在这四块里：`rkbin/` 里的 **loader**（DDR 初始化 + miniloader/ATF）。BootROM 先跑它，DDR 起来之后才轮到 U-Boot。它基本是预编译二进制、日常不改，但换 DDR 颗粒、改启动介质这类事必须动它。
+
+### 设备树为什么是两份
+
+这是最容易搞错的地方——**没有"一个设备树目录"**，U-Boot 和内核各有一份：
+
+| | U-Boot 的 dts | 内核的 dts |
+|---|---|---|
+| 路径 | `u-boot/arch/arm/dts/rk3568-*.dts` | `kernel/arch/arm64/boot/dts/rockchip/rk3568-*.dts` |
+| 谁来解析 | U-Boot / SPL 自己 | 内核 |
+| 管什么 | 内存大小、调试串口、存储控制器、`bootcmd` 要用的节点 | 全部外设：pinctrl、panel、codec、regulator、时钟 |
+| 特有写法 | `u-boot,dm-spl;`、`u-boot,dm-pre-reloc;` 这类"SPL 阶段也要用"的标记 | 不需要这些标记 |
+| 忘改的后果 | 串口没输出、找不到 eMMC、`bootcmd` 找不到镜像 | 驱动 probe 失败、屏幕不亮、网口不通 |
+
+为什么不能合并成一份：**SPL 阶段内存还没初始化完，只能解析极小的 DT**，所以 U-Boot 那份要裁到"够启动用"；内核那份才是完整的。
+
+两份必须在这几处对齐，否则会出现"一边能起、一边起不来"：
+
+| 必须一致 | 不一致的症状 |
+|---|---|
+| `memory` 节点（DDR 起始地址与容量） | U-Boot 正常、内核启动后跑飞或内存只认一半 |
+| 调试串口（`chosen` 的 `stdout-path`） | 一个有输出一个没输出，误判"内核挂了" |
+| 存储控制器与分区 | U-Boot 找得到 `boot` 分区、内核找不到 `rootfs` |
+| `bootargs` 的 `root=` 与真实分区名 | 内核起来但 panic：`Unable to mount root fs` |
+
+一句话记：**U-Boot 的 dts 决定"能不能把内核搬起来"，内核的 dts 决定"起来之后外设能不能用"。**
+
+## 三、SDK 顶层
 
 ```text
 rk3568_linux_sdk/
@@ -21,7 +64,9 @@ rk3568_linux_sdk/
 ├── device/               # 板级配置：BoardConfig-*.mk、parameter.txt、分区表
 │   └── rockchip/rk356x/
 ├── kernel/               # 内核源码（4.19.x）+ make.sh
+│   └── arch/arm64/boot/dts/rockchip/   # 内核那份设备树
 ├── u-boot/               # U-Boot 源码
+│   └── arch/arm/dts/     # U-Boot / SPL 那份设备树
 ├── buildroot/            # 根文件系统构建（工具链也在这）
 │   └── output/rockchip_rk3568/host/usr/bin/   # 交叉编译器实际位置
 ├── rkbin/                # Rockchip 预编译二进制（loader、DDR 初始化、签名工具）
@@ -45,7 +90,7 @@ rk3568_linux_sdk/
 | 交叉编译器 | `prebuilts/gcc/...`（内核用）、`buildroot/output/.../host/usr/bin/`（应用用） |
 | 最终可烧的镜像 | `output/firmware/` |
 
-## 三、`build.sh` 的用法
+## 四、`build.sh` 的用法
 
 ```bash
 ./build.sh              # 全量（uboot + kernel + rootfs）
@@ -65,7 +110,7 @@ rk3568_linux_sdk/
 
 **换板子必须先 `lunch`**，否则编出来的是上一块板子的配置——这是"我改了配置但没生效"的头号原因。
 
-## 四、`kernel/drivers/gpu/drm/` 的结构
+## 五、`kernel/drivers/gpu/drm/` 的结构
 
 RK 的显示子系统（DRM）是你查"屏幕不亮/花屏"的地方：
 
@@ -105,7 +150,7 @@ drivers/gpu/drm/
 
 **"屏幕背光亮但黑屏"** 通常卡在 `dw-mipi-dsi.c`（DSI 初始化序列/时钟）或设备树里的 panel 节点；**"完全没 `/dev/dri`"** 则是 `rockchip_drm_drv.c` 的 probe 失败，看 `dmesg | grep -i drm`。
 
-## 五、内核里其它常用目录（RK 版）
+## 六、内核里其它常用目录（RK 版）
 
 ```text
 kernel/
@@ -122,7 +167,7 @@ kernel/
 
 设备树在 `arch/arm64/boot/dts/rockchip/`——**RK 的板级 dts 名字通常形如 `rk3568-evb1-ddr4-v10.dts`**，和 `BoardConfig` 里的 `RK_KERNEL_DTS` 对应。
 
-## 六、定位一个文件的三步
+## 七、定位一个文件的三步
 
 ```bash
 # 1. 用 compatible 找驱动（最可靠）
@@ -137,6 +182,6 @@ ls drivers/gpu/drm/rockchip/
 
 大 SDK 里 `grep -rn` 从顶层扫会慢，**先进到对应子目录再扫**。
 
-## 七、一句话总结
+## 八、一句话总结
 
-**RK3568 的源码是"SDK 套内核"：顶层 `build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与设备树、`buildroot/output` 给应用工具链；显示问题就从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 三个文件查起。**
+**烧进板子的只有四样：设备树（U-Boot 一份、内核一份）、U-Boot、内核、根文件系统；源码上则是"SDK 套内核"——`build.sh` 是唯一入口、`device/` 管板级配置与分区、`kernel/` 管驱动与内核那份 dts、`buildroot/output` 给应用工具链；显示问题从 `drivers/gpu/drm/rockchip/` 的 vop、dsi、hdmi 查起。**
