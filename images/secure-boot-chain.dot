@@ -1,0 +1,37 @@
+digraph chain {
+  graph [rankdir=TB, dpi=200, bgcolor="white", nodesep=0.35, ranksep=0.34,
+         fontname="Noto Sans CJK SC", pad=0.25];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=12, color="#8a8a8a", penwidth=1.0, margin="0.16,0.10"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  rom   [label=<<b>BootROM</b><br/>芯片出厂固化，改不了<br/>它只信一件事：eFuse 里的公钥哈希>, fillcolor="#fdf0d5"];
+  efuse [label=<<b>eFuse / OTP</b><br/>公钥的 SHA256 哈希<br/>一次性写入，熔断后不可改>, fillcolor="#efe3f5"];
+
+  v1 [label=<<b>① 验 loader 签名</b><br/>用 eFuse 里的哈希确认公钥没被换<br/>再用这个公钥验 RSA-2048 签名>, fillcolor="#dbe8fb"];
+  loader [label=<<b>loader / SPL</b><br/>内含公钥，负责验下一级>, fillcolor="#dcf0e2"];
+
+  v2 [label=<<b>② 验 U-Boot 签名</b>>, fillcolor="#dbe8fb"];
+  uboot  [label=<<b>U-Boot</b><br/>读 boot 分区、传启动参数>, fillcolor="#dcf0e2"];
+
+  v3 [label=<<b>③ 验 boot.img 签名</b><br/>FIT 容器：kernel + dtb + resource>, fillcolor="#dbe8fb"];
+  boot  [label=<<b>boot.img</b><br/>验签通过才解出内核>, fillcolor="#dcf0e2"];
+
+  kernel [label="Linux 内核启动", fillcolor="#ececec"];
+  fail   [label=<<b>拒绝启动</b><br/>卡在这一级：串口停在验签处<br/>或直接无输出>, fillcolor="#f7dcdc", color="#c97070"];
+
+  rom -> v1;
+  efuse -> v1 [style=dashed, label="提供哈希"];
+  v1 -> loader [label="通过"];
+  v1 -> fail [label="失败", color="#c97070", fontcolor="#c97070"];
+  loader -> v2;
+  v2 -> uboot [label="通过"];
+  v2 -> fail [label="失败", color="#c97070", fontcolor="#c97070", constraint=false];
+  uboot -> v3;
+  v3 -> boot [label="通过"];
+  v3 -> fail [label="失败", color="#c97070", fontcolor="#c97070", constraint=false];
+  boot -> kernel;
+
+  note [shape=note, label=<<b>关键点</b><br/>每一级只负责验「下一级」<br/>篡改任何一级 → 链在此断掉<br/>签名防篡改，但不防「读走」明文>, fillcolor="#ffffff", color="#b0b0b0", fontsize=11];
+  rom -> note [style=invis];
+}

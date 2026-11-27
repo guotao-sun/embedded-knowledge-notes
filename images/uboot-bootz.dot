@@ -1,0 +1,20 @@
+digraph bootz {
+  graph [rankdir=TB, dpi=200, bgcolor="white", nodesep=0.35, ranksep=0.34,
+         fontname="Noto Sans CJK SC", pad=0.25];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=12, color="#8a8a8a", penwidth=1.0, margin="0.16,0.10"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  cmd   [label=<<b>① U-Boot 里敲命令</b><br/>fatload mmc 0:1 0x82000000 zImage<br/>fatload mmc 0:1 0x83000000 rk3568.dtb>, fillcolor="#dbe8fb"];
+  mem   [label=<<b>② 内存里已就位</b><br/>0x82000000：zImage（自解压壳 + 压缩内核）<br/>0x83000000：dtb（二进制设备树）>, fillcolor="#dcf0e2"];
+  bootz [label=<<b>③ bootz 0x82000000 - 0x83000000</b><br/>校验 zImage 头 → 自解压到运行地址<br/>把 dtb 地址放进传参寄存器>, fillcolor="#fdf0d5"];
+  args  [label=<<b>bootargs（第三个信息）</b><br/>console=ttyFIQ0,1500000<br/>root=/dev/mmcblk2p2 rw>, fillcolor="#efe3f5"];
+  kern  [label=<<b>④ 跳进内核入口</b><br/>ARM32 约定：r0=0，r1=machine id，r2=dtb 地址<br/>开始跑 start_kernel>, fillcolor="#ececec"];
+  later [label=<<b>⑤ 内核接手</b><br/>解析 dtb → 找到 console → 挂 rootfs<br/>最后 exec /sbin/init>, fillcolor="#ececec"];
+
+  cmd -> mem [label="搬进内存"];
+  mem -> bootz [label="从这里取"];
+  args -> bootz [label="传给内核", constraint=false];
+  bootz -> kern [label="跳转"];
+  kern -> later [label="初始化"];
+}
