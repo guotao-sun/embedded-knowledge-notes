@@ -1,0 +1,20 @@
+digraph sysfs {
+  graph [rankdir=LR, dpi=200, bgcolor="white", nodesep=0.30, ranksep=0.55,
+         fontname="Noto Sans CJK SC", pad=0.28];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=11, color="#8a8a8a", penwidth=1.0, margin="0.14,0.10"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  bus   [label=<<b>/sys/bus/&lt;bus&gt;/</b><br/>按「总线」索引<br/>devices/ 与 drivers/ 两个子目录>, fillcolor="#dbe8fb"];
+  cls   [label=<<b>/sys/class/&lt;class&gt;/</b><br/>按「功能类型」索引<br/>如 net、leds、tty、thermal>, fillcolor="#dbe8fb"];
+  devblk[label=<<b>/sys/dev/char|block/</b><br/>按「主:次设备号」索引<br/>4:64 → ttyS0>, fillcolor="#dbe8fb"];
+
+  devices [label=<<b>/sys/devices/</b><br/><b>唯一真实的那棵树</b><br/>按「物理挂接关系」组织的设备对象<br/>platform/、pci0000:00/、soc/ …>, fillcolor="#dcf0e2"];
+
+  same [label=<<b>同一个内核对象</b><br/>三个视图里的条目都是<br/>指向 devices 下同一节点的<b>符号链接</b><br/>改一处，四处都变>, fillcolor="#fdf0d5"];
+
+  bus -> devices [style=dashed, label="符号链接"];
+  cls -> devices [style=dashed, label="符号链接"];
+  devblk -> devices [style=dashed, label="符号链接"];
+  devices -> same [label="都是它的投影"];
+}

@@ -1,0 +1,21 @@
+digraph thermal {
+  graph [rankdir=LR, dpi=200, bgcolor="white", nodesep=0.32, ranksep=0.50,
+         fontname="Noto Sans CJK SC", pad=0.28];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=11, color="#8a8a8a", penwidth=1.0, margin="0.14,0.10"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  sense [label=<<b>温度源</b><br/>thermal_zone0/temp<br/>毫摄氏度（×1000）>, fillcolor="#dbe8fb"];
+  zone  [label=<<b>thermal_zone</b><br/>type：传感器名字<br/>trip_point_*：几档阈值>, fillcolor="#dcf0e2"];
+  gov   [label=<<b>governor / policy</b><br/>决定"超温了怎么降"<br/>step_wise、power_allocator>, fillcolor="#efe3f5"];
+
+  cpufreq [label=<<b>cooling device：CPU</b><br/>降频 / 限核>, fillcolor="#fdf0d5"];
+  fan     [label=<<b>cooling device：风扇</b><br/>调 PWM 转速>, fillcolor="#fdf0d5"];
+  crit    [label=<<b>critical trip</b><br/>再热就直接关机保护>, fillcolor="#f7dcdc", color="#c97070"];
+
+  sense -> zone [label="读"];
+  zone -> gov [label="超过 passive 阈值"];
+  gov -> cpufreq [label="拉低频率"];
+  gov -> fan [label="加大转速"];
+  zone -> crit [style=dashed, label="超过 critical", color="#c97070", fontcolor="#c97070"];
+}
