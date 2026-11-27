@@ -1,0 +1,27 @@
+digraph drm {
+  graph [rankdir=TB, dpi=200, bgcolor="white", nodesep=0.20, ranksep=0.34,
+         fontname="Noto Sans CJK SC", pad=0.22];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=11, color="#8a8a8a", penwidth=1.0, margin="0.18,0.08", width=4.6];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  app  [label="应用 / 合成器（Qt、Weston）", fillcolor="#dbe8fb"];
+  lib  [label="libdrm：AtomicCommit / ioctl", fillcolor="#efe3f5"];
+  card [label="drm card0：/dev/dri/card0", fillcolor="#dcf0e2"];
+  fb   [label="Framebuffer：一块显存（dumb / dmabuf）", fillcolor="#ececec"];
+
+  plane[label="Plane：一个图层（图像 + 位置 + 格式）", fillcolor="#fdf0d5"];
+  crtc [label="CRTC：VOP，时序 + 图层合成", fillcolor="#fdf0d5"];
+  enc  [label="Encoder：DSI / HDMI 打包", fillcolor="#fdf0d5"];
+  conn [label="Connector：物理接口（面板 / HDMI 口）", fillcolor="#fdf0d5"];
+  panel[label="屏幕：MIPI 面板 / HDMI 显示器", fillcolor="#ffffff", color="#c0c0c0"];
+
+  app -> lib [label="画到 buffer"];
+  lib -> card [label="commit（一次生效）"];
+  card -> fb  [style=dotted, label="分配"];
+  fb -> plane [style=dashed, label="贴上图层"];
+  plane -> crtc [label="合成"];
+  crtc -> enc [label="扫描输出"];
+  enc -> conn [label="电信号"];
+  conn -> panel [label="点亮"];
+}

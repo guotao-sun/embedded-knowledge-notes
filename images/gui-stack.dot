@@ -1,0 +1,33 @@
+digraph stack {
+  graph [rankdir=TB, dpi=200, bgcolor="white", nodesep=0.34, ranksep=0.46,
+         fontname="Noto Sans CJK SC", pad=0.25];
+  node  [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC",
+         fontsize=11, color="#8a8a8a", penwidth=1.0, margin="0.16,0.09"];
+  edge  [color="#8a8a8a", arrowsize=0.7, fontname="Noto Sans CJK SC", fontsize=10];
+
+  gtk  [label=<<b>GTK 应用</b>>, fillcolor="#dbe8fb"];
+  qt   [label=<<b>Qt 应用</b>>, fillcolor="#dbe8fb"];
+  raw  [label=<<b>全屏自绘程序</b><br/>直接写 framebuffer>, fillcolor="#dbe8fb"];
+
+  desk [label=<<b>桌面环境</b>（KDE / GNOME / 轻量 WM）<br/>面板、任务栏、启动器、壁纸>, fillcolor="#efe3f5"];
+  srv  [label=<<b>显示服务器</b><br/>Xorg / Wayland compositor<br/>窗口管理 + 合成 + 输入分发>, fillcolor="#fdf0d5"];
+
+  ev   [label=<<b>输入子系统</b><br/>evdev / libinput>, fillcolor="#dcf0e2"];
+  drm  [label=<<b>DRM / KMS</b><br/>VOP、DSI、HDMI 驱动>, fillcolor="#dcf0e2"];
+
+  in   [label=<<b>输入硬件</b><br/>触摸屏 / 键鼠>, fillcolor="#ececec"];
+  disp [label=<<b>显示硬件</b><br/>控制器 → DSI/HDMI → 面板>, fillcolor="#ececec"];
+
+  {rank=same; gtk; qt; raw;}
+  {rank=same; ev; drm;}
+  {rank=same; in; disp;}
+
+  gtk -> desk [label="窗口内容"];
+  qt  -> desk [label="窗口内容"];
+  desk -> srv [label="客户端请求"];
+  raw -> drm  [style=dashed, color="#4a8c5a", fontcolor="#4a8c5a", label="EGLFS / LinuxFB 直出"];
+  srv -> drm  [label="commit"];
+  ev  -> srv  [label="输入事件"];
+  in  -> ev   [label="中断"];
+  drm -> disp [label="像素"];
+}
