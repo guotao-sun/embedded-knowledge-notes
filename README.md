@@ -55,12 +55,12 @@
 
 - [ALSA 学习路线](./04-ALSA音频驱动/ALSA-01-入门-学习路线.md)
 - [Linux 音频栈](./04-ALSA音频驱动/ALSA-02-架构-Linux音频栈.md)
-- [Linux 声卡 ALSA](./04-ALSA音频驱动/ALSA-03-架构-Linux声卡与ALSA.md)
+- [Linux 声卡与 ALSA](./04-ALSA音频驱动/ALSA-03-架构-Linux声卡与ALSA.md)
 - [音频数据结构层次](./04-ALSA音频驱动/ALSA-04-数据-音频数据结构层次.md)
 - [Machine 驱动（硬件板卡的音频系统配置文件）](./04-ALSA音频驱动/ALSA-05-驱动-Machine驱动.md)
 - [ALSA 的设备树示例](./04-ALSA音频驱动/ALSA-06-设备树-ALSA设备树示例.md)
-- [Linux 音频驱动编译调试流程（ALSA 编译调试）](./04-ALSA音频驱动/ALSA-07-调试-驱动编译调试流程.md)
-- [LINUX 开发板录放指令](./04-ALSA音频驱动/ALSA-08-使用-开发板录放指令.md)
+- [Linux 音频驱动编译调试流程](./04-ALSA音频驱动/ALSA-07-调试-驱动编译调试流程.md)
+- [Linux 开发板录放指令](./04-ALSA音频驱动/ALSA-08-使用-开发板录放指令.md)
 
 ### 05-编译与构建系统
 
